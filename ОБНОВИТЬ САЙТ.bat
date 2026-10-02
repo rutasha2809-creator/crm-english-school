@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 cd /d "%~dp0"
 echo.
@@ -10,7 +10,7 @@ if "%MSG%"=="" set MSG=обновление
 git commit -m "%MSG%"
 git push -u origin main
 echo.
-echo Готово. Сайт обновится за минуту-две:
+echo Если выше нет ошибок - готово. Сайт обновится за минуту-две:
 echo https://rutasha2809-creator.github.io/crm-english-school/
 echo.
 pause
