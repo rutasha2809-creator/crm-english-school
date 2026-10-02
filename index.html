@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Занятия и оплаты</title>
+<meta name="description" content="Учёт занятий, оплат родителей и выплат педагогам онлайн-школы английского.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d6b61'/%3E%3Cpath d='M9 11h14M9 16h14M9 21h9' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Onest:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="chrome" hidden>
+<header class="app">
+  <div class="hwrap">
+    <div class="hrow">
+      <h1>Занятия и оплаты <span id="h-sub"></span></h1>
+      <div class="mswitch">
+        <button id="m-prev" type="button" title="Предыдущий месяц">‹</button>
+        <span class="lbl" id="m-lbl">—</span>
+        <button id="m-next" type="button" title="Следующий месяц">›</button>
+      </div>
+      <div class="hbtns">
+        <button id="m-today" type="button">Текущий месяц</button>
+        <button id="signout" type="button">Выйти</button>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs"></nav>
+  </div>
+</header>
+</div>
+<main id="main"><div class="boot"><b>Загружаю</b>Секунду.</div></main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
