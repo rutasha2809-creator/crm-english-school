@@ -182,3 +182,21 @@ h1 span{font-size:12.5px}
 .refnav button:hover{background:var(--surface-2);color:var(--ink)}
 .refnav button[aria-current="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .refh{margin:8px 0 0;font-size:13px;font-weight:600;color:var(--ink-2);font-family:var(--font-ui)}
+
+/* сворачивающиеся блоки справочника */
+.acc{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--surface)}
+.acchead{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:0;background:transparent;cursor:pointer;padding:9px 12px;font-family:var(--font-ui);color:var(--ink);min-width:0}
+.acchead:hover{background:var(--surface-2)}
+.acctitle{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.accmeta{margin-left:auto;font-size:12px;color:var(--ink-3);font-family:var(--font-body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
+.accarrow{flex:0 0 auto;width:9px;height:9px;border-right:2px solid var(--ink-3);border-bottom:2px solid var(--ink-3);transform:rotate(-45deg);margin-left:2px}
+@media (prefers-reduced-motion:no-preference){.accarrow{transition:transform .15s ease}}
+.acchead[aria-expanded="true"] .accarrow{transform:rotate(45deg)}
+.acchead[aria-expanded="true"]{background:var(--surface-2);border-bottom:1px solid var(--line)}
+.accbody{padding:10px 12px 12px}
+.acc-group>.accbody{padding:8px}
+.accinner{display:grid;gap:6px;min-width:0}
+.acc .acc{background:var(--surface)}
+.sub-acc>.acchead{padding:7px 10px}
+.sub-acc .acctitle{font-weight:500}
+.accbody .refrow{border:0;padding:0}
