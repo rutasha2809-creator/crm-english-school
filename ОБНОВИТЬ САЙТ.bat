@@ -8,7 +8,7 @@ git add -A
 set /p MSG="Что изменилось (Enter - просто обновление): "
 if "%MSG%"=="" set MSG=обновление
 git commit -m "%MSG%"
-git push
+git push -u origin main
 echo.
 echo Готово. Сайт обновится за минуту-две:
 echo https://rutasha2809-creator.github.io/crm-english-school/
