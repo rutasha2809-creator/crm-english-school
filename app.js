@@ -689,28 +689,66 @@ function refRates(){
   c.appendChild(box);
   return c;
 }
+function tariffPrice(name){
+  var t=tariffs().filter(function(x){return x.name===name;})[0];
+  return t?(+t.price||0):0;
+}
+function packageTotal(x){
+  var price=tariffPrice(x.tariff),gross=(+x.lessons||0)*price;
+  return Math.round(gross-gross*(+x.discount||0)/100);
+}
 function refPackages(){
   var c=el('<div class="card"><div class="chead"><h2>Абонементы</h2>'+
-    '<span class="hint">Готовые пакеты занятий — подставляются в колонку «К оплате зан.»</span></div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Занятий</th><th>Примечание</th><th></th></tr></thead><tbody></tbody></table>');
+    '<span class="hint">Стоимость = количество занятий × стоимость урока минус скидка</span>'+
+    '</div><div class="tscroll"></div></div>');
+  var tbl=el('<table><thead><tr>'+
+    '<th>Название</th><th>Вид занятий</th><th class="r">Количество занятий</th>'+
+    '<th class="r">Стоимость урока</th><th class="r">Скидка, %</th>'+
+    '<th class="r">Стоимость абонемента</th><th></th>'+
+    "</tr></thead><tbody></tbody></table>");
   var tb=tbl.querySelector("tbody");
-  packages().forEach(function(x,i){
+  var list=packages();
+  list.forEach(function(x,i){
     var tr=document.createElement("tr");
-    tr.appendChild(settingCell("packages",i,"name",x.name,"text",200));
-    tr.appendChild(settingCell("packages",i,"lessons",x.lessons,"number",70));
-    tr.appendChild(settingCell("packages",i,"note",x.note,"text",240));
+    tr.appendChild(settingCell("packages",i,"name",x.name,"text",210));
+    tr.appendChild(settingSelect("packages",i,"tariff",x.tariff,
+      [["","— выбрать —"]].concat(tariffs().map(function(t){return[t.name,t.name];}))));
+    tr.appendChild(settingCell("packages",i,"lessons",x.lessons,"number",80));
+    var price=tariffPrice(x.tariff);
+    tr.appendChild(el('<td class="r sub">'+(x.tariff?esc(fmtMoney(price)):"—")+"</td>"));
+    tr.appendChild(settingCell("packages",i,"discount",x.discount,"number",72));
+    tr.appendChild(el('<td class="r"><b>'+esc(fmtMoney(packageTotal(x)))+"</b></td>"));
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
     rm.onclick=function(){var l=packages().slice();l.splice(i,1);saveSettingList("packages",l);};
     td.appendChild(rm);tr.appendChild(td);
     tb.appendChild(tr);
   });
-  var trAdd=el('<tr><td colspan="4"></td></tr>');
+  if(!list.length)tb.appendChild(el('<tr><td colspan="7" class="sub">Пока ни одного абонемента.</td></tr>'));
+  var trAdd=el('<tr><td colspan="7"></td></tr>');
   var add=el('<button class="btn sm" type="button">Добавить абонемент</button>');
-  add.onclick=function(){saveSettingList("packages",packages().concat([{name:"Новый абонемент",lessons:8,note:""}]));};
+  add.onclick=function(){
+    saveSettingList("packages",packages().concat([{name:"",tariff:"",lessons:8,discount:0}]));
+  };
   trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
   c.querySelector(".tscroll").appendChild(tbl);
   return c;
+}
+function settingSelect(listName,idx,field,value,opts){
+  var td=document.createElement("td");
+  var sel=document.createElement("select");
+  sel.id="st-"+listName+"-"+idx+"-"+field;
+  opts.forEach(function(o){
+    var op=document.createElement("option");op.value=o[0];op.textContent=o[1];
+    if(String(o[0])===String(value||""))op.selected=true;
+    sel.appendChild(op);
+  });
+  sel.onchange=function(){
+    var l=(state.settings[listName]||[]).slice();
+    l[idx]=Object.assign({},l[idx]);l[idx][field]=sel.value;
+    saveSettingList(listName,l);
+  };
+  td.appendChild(sel);return td;
 }
 function settingCell(listName,idx,field,value,type,width){
   var td=document.createElement("td");
