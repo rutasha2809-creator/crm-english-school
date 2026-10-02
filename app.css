@@ -175,3 +175,10 @@ label.f>input,label.f>select,label.f>textarea{font-weight:400;text-transform:non
 .hbtns button:hover{background:var(--surface-2);color:var(--ink)}
 h1 span{font-size:12.5px}
 @media(max-width:560px){h1 span{display:none}}
+
+/* навигация по блокам справочника */
+.refnav{display:flex;gap:6px;flex-wrap:wrap}
+.refnav button{font-family:var(--font-ui);font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);padding:6px 13px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.refnav button:hover{background:var(--surface-2);color:var(--ink)}
+.refnav button[aria-current="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.refh{margin:8px 0 0;font-size:13px;font-weight:600;color:var(--ink-2);font-family:var(--font-ui)}
