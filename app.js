@@ -137,18 +137,29 @@ function paySlots(u){
   return[{key:"solo",name:u.name,parent:u.parent,defPrice:+u.price||0,note:u.note||""}];
 }
 /* Начисление идёт вперёд: занятий к оплате = план месяца минус перенос. */
+function packageOf(u){
+  if(!u.pkg)return null;
+  var ps=packages().filter(function(x){return x.name===u.pkg;});
+  return ps.length?ps[0]:null;
+}
 function slotData(u,sl,ym){
   ym=ym||state.ym;
   var md=state.months[ym+"__"+u.id]||{days:{},pay:{}};
   var rec=(md.pay||{})[sl.key]||{};
   var plan=planDays(u,ym).length;
+  var pkg=packageOf(u);
   var carry=+rec.carry||0;
-  var lessons=rec.lessons==null?Math.max(0,plan-carry):(+rec.lessons||0);
-  var price=rec.price==null?sl.defPrice:(+rec.price||0);
+  var defLessons=pkg?(+pkg.lessons||0):Math.max(0,plan-carry);
+  var lessons=rec.lessons==null?Math.max(0,defLessons-(pkg?carry:0)):(+rec.lessons||0);
+  var defPrice=pkg&&pkg.tariff?tariffPrice(pkg.tariff):sl.defPrice;
+  var price=rec.price==null?defPrice:(+rec.price||0);
+  var discount=rec.discount==null?(pkg?(+pkg.discount||0):0):(+rec.discount||0);
+  var gross=lessons*price;
+  var charge=Math.round(gross-gross*discount/100);
   var amount=+rec.amount||0;
-  return{key:sl.key,plan:plan,carry:carry,lessons:lessons,price:price,
-    charge:lessons*price,amount:amount,left:lessons*price-amount,
-    date:rec.date||"",note:rec.note||rec.comment||""};
+  return{key:sl.key,plan:plan,carry:carry,lessons:lessons,price:price,discount:discount,
+    charge:charge,amount:amount,left:charge-amount,pkg:pkg,
+    date:rec.date||"",note:rec.note||""};
 }
 function unitBilling(u,ym){
   var c=0,a=0,l=0;
@@ -430,7 +441,7 @@ function viewMoney(){
     '<span class="hint">Занятий к оплате = план месяца минус перенос с прошлого</span></div><div class="tscroll"></div></div>');
   var t1=el('<table><thead><tr>'+
     '<th>Ученик</th><th>Родитель</th><th class="r">План</th><th class="r">Перенос</th>'+
-    '<th class="r">К оплате зан.</th><th class="r">Цена</th><th class="r">Абонемент</th>'+
+    '<th class="r">К оплате зан.</th><th class="r">Цена</th><th class="r">Скидка, %</th><th class="r">Абонемент</th>'+
     '<th class="r">Оплачено</th><th>Дата</th><th></th><th class="r">Остаток</th>'+
     '<th class="nowrap">Перенести в '+esc(nextLbl)+'</th>'+
     "</tr></thead><tbody></tbody></table>");
@@ -438,7 +449,7 @@ function viewMoney(){
   var T={charge:0,amount:0,lessons:0};
   teacherList().forEach(function(t){
     var us=unitsOf(t.id);if(!us.length)return;
-    b1.appendChild(el('<tr class="grp"><td colspan="12">'+esc(t.name)+"</td></tr>"));
+    b1.appendChild(el('<tr class="grp"><td colspan="13">'+esc(t.name)+"</td></tr>"));
     us.forEach(function(u){
       var s=unitStats(u);
       paySlots(u).forEach(function(sl){
@@ -451,6 +462,7 @@ function viewMoney(){
         tr.appendChild(numCell(u,sl,"carry",d.carry,1,60));
         tr.appendChild(numCell(u,sl,"lessons",d.lessons,1,66));
         tr.appendChild(numCell(u,sl,"price",d.price,50,86));
+        tr.appendChild(numCell(u,sl,"discount",d.discount,1,68));
         tr.appendChild(el('<td class="r"><b>'+esc(fmtMoney(d.charge))+"</b></td>"));
         tr.appendChild(numCell(u,sl,"amount",d.amount,100,96));
         var tdDt=document.createElement("td");
@@ -486,12 +498,13 @@ function viewMoney(){
         wrapC.appendChild(ci);wrapC.appendChild(cb);
         tdC.appendChild(wrapC);tr.appendChild(tdC);
         b1.appendChild(tr);
-        if(d.note)b1.appendChild(el('<tr><td colspan="12" class="sub" style="padding-left:22px">'+esc(d.note)+"</td></tr>"));
+        var sub=[d.pkg?"абонемент «"+d.pkg.name+"»":"",d.note].filter(Boolean).join(" · ");
+        if(sub)b1.appendChild(el('<tr><td colspan="13" class="sub" style="padding-left:22px">'+esc(sub)+"</td></tr>"));
       });
     });
   });
   b1.appendChild(el('<tr class="tot"><td colspan="4">Итого</td><td class="r">'+fmtNum(T.lessons)+
-    '</td><td></td><td class="r">'+esc(fmtMoney(T.charge))+'</td><td class="r">'+esc(fmtMoney(T.amount))+
+    '</td><td colspan="2"></td><td class="r">'+esc(fmtMoney(T.charge))+'</td><td class="r">'+esc(fmtMoney(T.amount))+
     '</td><td colspan="2"></td><td class="r">'+esc(fmtMoney(T.charge-T.amount))+"</td><td></td></tr>"));
   cardIn.querySelector(".tscroll").appendChild(t1);
   wrap.appendChild(cardIn);
@@ -636,22 +649,27 @@ function refTeachers(){
   add.onclick=addTeacher;h.appendChild(add);
   return c;
 }
+function soloUnits(){
+  var a=[];
+  for(var k in state.units){
+    var u=state.units[k];
+    if(u.kind==="solo"&&u.active!==false)a.push(u);
+  }
+  a.sort(function(x,y){return String(x.name).localeCompare(String(y.name),"ru");});
+  return a;
+}
 function refStudents(){
   var c=el('<div class="card"><div class="chead"><h2>Ученики</h2>'+
-    '<span class="hint">Дни недели задают план на любой месяц</span></div><div class="ref"></div></div>');
+    '<span class="hint">В карточке задаются учитель, абонемент и дни недели</span></div><div class="ref"></div></div>');
   var h=c.querySelector(".ref");
-  teacherList().forEach(function(t){
-    var us=unitsOf(t.id).filter(function(u){return u.kind==="solo";});
-    if(!us.length)return;
-    h.appendChild(acc("ts:"+t.id,esc(t.name),us.length+" уч.",function(){
-      var box=el('<div class="accinner"></div>');
-      us.forEach(function(u){
-        var meta=[u.parent||"",fmtMoney(u.price),wdText(u)].filter(Boolean).join(" · ");
-        box.appendChild(acc("u:"+u.id,esc(u.name),esc(meta),function(){return unitRow(u);},"sub-acc"));
-      });
-      return box;
-    },"acc-group"));
+  var list=soloUnits();
+  list.forEach(function(u){
+    var t=state.teachers[u.teacherId]||{};
+    var meta=[t.name||"учитель не выбран",u.pkg||"абонемент не выбран",u.parent||"",wdText(u)]
+      .filter(Boolean).join(" · ");
+    h.appendChild(acc("u:"+u.id,esc(u.name),esc(meta),function(){return unitRow(u);}));
   });
+  if(!list.length)h.appendChild(el('<p class="sub" style="margin:0">Пока ни одного ученика.</p>'));
   var add=el('<button class="btn" type="button" style="justify-self:start">Добавить ученика</button>');
   add.onclick=function(){addUnit("solo");};h.appendChild(add);
   return c;
@@ -865,6 +883,8 @@ function unitRow(u){
   f.appendChild(field("Имя","u-name-"+u.id,u.name,"text",function(v){saveUnit(u.id,{name:v});}));
   if(u.kind==="solo"){
     f.appendChild(field("Родитель","u-par-"+u.id,u.parent,"text",function(v){saveUnit(u.id,{parent:v});}));
+    f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
+      [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
     var tl=tariffs();
     if(tl.length){
       f.appendChild(field("Тариф клиента","u-tar-"+u.id,"", null,function(v){
@@ -872,10 +892,14 @@ function unitRow(u){
         saveUnit(u.id,{price:+v||0});
       },[["","— выбрать тариф —"]].concat(tl.map(function(x){return[x.price,x.name+" · "+fmtMoney(x.price)];}))));
     }
+    f.appendChild(field("Абонемент","u-pkg-"+u.id,u.pkg||"",null,function(v){saveUnit(u.id,{pkg:v});},
+      [["","— без абонемента —"]].concat(packages().map(function(x){
+        return[x.name,x.name+" · "+(x.lessons||0)+" зан. · "+fmtMoney(packageTotal(x))];}))));
     f.appendChild(field("Цена занятия, ₽","u-price-"+u.id,u.price,"number",function(v){saveUnit(u.id,{price:v});}));
   }
-  f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
-    teacherList().map(function(x){return[x.id,x.name];})));
+  if(u.kind==="group")f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,
+    function(v){saveUnit(u.id,{teacherId:v});},
+    [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
   f.appendChild(field("Формат","u-f-"+u.id,u.format,null,function(v){saveUnit(u.id,{format:v});},
     [["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]]));
   f.appendChild(field("Ставка педагога, ₽","u-rate-"+u.id,u.rate,"number",function(v){saveUnit(u.id,{rate:v});}));
@@ -1016,12 +1040,14 @@ function teacherToRow(t){
 function unitFromRow(r){
   return{id:r.id,kind:r.kind||"solo",name:r.name||"",parent:r.parent||"",teacherId:r.teacher_id||"",
     format:r.format||"individual",price:num(r.price),rate:r.rate==null?undefined:num(r.rate),
+    pkg:r.package_name||"",
     weekdays:(r.weekdays||[]).map(Number),members:r.members||[],channel:r.channel||"",
     note:r.note||"",active:r.active!==false,order:r.order_no};
 }
 function unitToRow(u){
   return{id:u.id,kind:u.kind||"solo",name:u.name||"",parent:u.parent||"",teacher_id:u.teacherId||"",
     format:u.format||"individual",price:num(u.price),rate:u.rate==null?null:num(u.rate),
+    package_name:u.pkg||"",
     weekdays:(u.weekdays||[]).map(Number),members:u.members||[],channel:u.channel||"",
     note:u.note||"",active:u.active!==false,order_no:u.order==null?900:u.order};
 }
