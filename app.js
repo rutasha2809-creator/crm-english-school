@@ -40,8 +40,9 @@ function unitsOf(tid){
   return a;
 }
 function baseRates(){return(state.settings.baseRates)||{individual:1000,mini:1500,group:1000};}
+/* Ставка педагога живёт только в справочнике «Тарифы педагогов»:
+   личная ставка учителя, иначе базовая ставка по формату занятия. */
 function rateOf(u){
-  if(typeof u.rate==="number")return u.rate;
   var t=state.teachers[u.teacherId];
   if(t&&t.rates&&typeof t.rates[u.format]==="number")return t.rates[u.format];
   var b=baseRates();return b[u.format]||0;
@@ -735,20 +736,31 @@ function refRates(){
     lab.appendChild(inp);f.appendChild(lab);
   });
   box.appendChild(f);
-  box.appendChild(el('<h3 class="refh">Личные ставки</h3>'));
-  box.appendChild(el('<p class="sub" style="margin:0">Пусто — значит действует базовая ставка. Ставка конкретного ученика важнее личной.</p>'));
-  var f2=el('<div class="fields"></div>');
+  box.appendChild(el('<h3 class="refh">Личные ставки педагогов</h3>'));
+  box.appendChild(el('<p class="sub" style="margin:0">Пусто — действует базовая ставка по формату занятия.</p>'));
+  var f2=el('<div class="ref" style="padding:0;gap:8px"></div>');
+  var FMT=[["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]];
   teacherList().forEach(function(t){
-    var lab=el('<label class="f">'+esc(t.name)+", ₽</label>");
-    var inp=document.createElement("input");inp.type="number";inp.min="0";inp.step="50";
-    inp.id="tr-"+t.id;inp.value=(t.rates||{}).individual||"";
-    inp.placeholder=String(b.individual||0);
-    inp.onchange=function(){
-      var r=Object.assign({},t.rates||{});
-      if(+inp.value)r.individual=+inp.value;else delete r.individual;
-      saveTeacher(t.id,{rates:r});
-    };
-    lab.appendChild(inp);f2.appendChild(lab);
+    var rr=t.rates||{};
+    var cur=FMT.map(function(x){
+      return typeof rr[x[0]]==="number"?x[1]+" "+fmtMoney(rr[x[0]]):"";}).filter(Boolean).join(" · ");
+    f2.appendChild(acc("rt:"+t.id,esc(t.name),esc(cur||"по базовым ставкам"),function(){
+      var ff=el('<div class="fields"></div>');
+      FMT.forEach(function(x){
+        var lab=el('<label class="f">'+esc(x[1])+", ₽</label>");
+        var inp=document.createElement("input");inp.type="number";inp.min="0";inp.step="50";
+        inp.id="tr-"+t.id+"-"+x[0];
+        inp.value=typeof rr[x[0]]==="number"?rr[x[0]]:"";
+        inp.placeholder=String(b[x[0]]||0);
+        inp.onchange=function(){
+          var nr=Object.assign({},t.rates||{});
+          if(inp.value==="")delete nr[x[0]];else nr[x[0]]=+inp.value||0;
+          saveTeacher(t.id,{rates:nr});
+        };
+        lab.appendChild(inp);ff.appendChild(lab);
+      });
+      return ff;
+    }));
   });
   box.appendChild(f2);
   c.appendChild(box);
@@ -896,8 +908,6 @@ function unitRow(u){
       [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
     f.appendChild(field("Формат","u-f-"+u.id,u.format,null,function(v){saveUnit(u.id,{format:v});},
       [["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]]));
-    f.appendChild(field("Ставка педагога, ₽","u-rate-"+u.id,u.rate,"number",function(v){saveUnit(u.id,{rate:v});}));
-    f.appendChild(field("Заметка","u-note-"+u.id,u.note,"text",function(v){saveUnit(u.id,{note:v});}));
   }
   row.appendChild(f);
   var wdlab=el('<label class="f">Дни недели</label>');
@@ -981,7 +991,7 @@ function addUnit(kind){
   var id=newId(kind==="group"?"g":"u"),tl=teacherList();
   var body={kind:kind,name:kind==="group"?"Новая группа":"Новый ученик",parent:"",
     teacherId:tl.length?tl[0].id:"",format:kind==="group"?"group":"individual",
-    price:kind==="group"?0:2500,rate:1000,weekdays:[],note:"",active:true,
+    price:kind==="group"?0:2500,weekdays:[],note:"",active:true,
     order:900+Object.keys(state.units).length,channel:"",members:[]};
   state.units[id]=Object.assign({id:id},body);render();
   API.saveUnit(id,body).catch(saveFailed);
@@ -1034,14 +1044,14 @@ function teacherToRow(t){
 }
 function unitFromRow(r){
   return{id:r.id,kind:r.kind||"solo",name:r.name||"",parent:r.parent||"",teacherId:r.teacher_id||"",
-    format:r.format||"individual",price:num(r.price),rate:r.rate==null?undefined:num(r.rate),
+    format:r.format||"individual",price:num(r.price),
     pkg:r.package_name||"",
     weekdays:(r.weekdays||[]).map(Number),members:r.members||[],channel:r.channel||"",
     note:r.note||"",active:r.active!==false,order:r.order_no};
 }
 function unitToRow(u){
   return{id:u.id,kind:u.kind||"solo",name:u.name||"",parent:u.parent||"",teacher_id:u.teacherId||"",
-    format:u.format||"individual",price:num(u.price),rate:u.rate==null?null:num(u.rate),
+    format:u.format||"individual",price:num(u.price),rate:null,
     package_name:u.pkg||"",
     weekdays:(u.weekdays||[]).map(Number),members:u.members||[],channel:u.channel||"",
     note:u.note||"",active:u.active!==false,order_no:u.order==null?900:u.order};
