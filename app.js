@@ -885,25 +885,20 @@ function unitRow(u){
     f.appendChild(field("Родитель","u-par-"+u.id,u.parent,"text",function(v){saveUnit(u.id,{parent:v});}));
     f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
       [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
-    var tl=tariffs();
-    if(tl.length){
-      f.appendChild(field("Тариф клиента","u-tar-"+u.id,"", null,function(v){
-        if(v==="")return;
-        saveUnit(u.id,{price:+v||0});
-      },[["","— выбрать тариф —"]].concat(tl.map(function(x){return[x.price,x.name+" · "+fmtMoney(x.price)];}))));
-    }
     f.appendChild(field("Абонемент","u-pkg-"+u.id,u.pkg||"",null,function(v){saveUnit(u.id,{pkg:v});},
       [["","— без абонемента —"]].concat(packages().map(function(x){
         return[x.name,x.name+" · "+(x.lessons||0)+" зан. · "+fmtMoney(packageTotal(x))];}))));
     f.appendChild(field("Цена занятия, ₽","u-price-"+u.id,u.price,"number",function(v){saveUnit(u.id,{price:v});}));
   }
-  if(u.kind==="group")f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,
-    function(v){saveUnit(u.id,{teacherId:v});},
-    [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
-  f.appendChild(field("Формат","u-f-"+u.id,u.format,null,function(v){saveUnit(u.id,{format:v});},
-    [["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]]));
-  f.appendChild(field("Ставка педагога, ₽","u-rate-"+u.id,u.rate,"number",function(v){saveUnit(u.id,{rate:v});}));
-  f.appendChild(field("Заметка","u-note-"+u.id,u.note,"text",function(v){saveUnit(u.id,{note:v});}));
+  if(u.kind==="group"){
+    f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,
+      function(v){saveUnit(u.id,{teacherId:v});},
+      [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
+    f.appendChild(field("Формат","u-f-"+u.id,u.format,null,function(v){saveUnit(u.id,{format:v});},
+      [["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]]));
+    f.appendChild(field("Ставка педагога, ₽","u-rate-"+u.id,u.rate,"number",function(v){saveUnit(u.id,{rate:v});}));
+    f.appendChild(field("Заметка","u-note-"+u.id,u.note,"text",function(v){saveUnit(u.id,{note:v});}));
+  }
   row.appendChild(f);
   var wdlab=el('<label class="f">Дни недели</label>');
   wdlab.appendChild(wdPicker(u));
