@@ -918,8 +918,11 @@ function unitRow(u){
   /* группа */
   f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
     [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
-  f.appendChild(field("Формат","u-f-"+u.id,u.format,null,function(v){saveUnit(u.id,{format:v});},
-    [["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]]));
+  var br=baseRates(),tt=state.teachers[u.teacherId]||{},tr=tt.rates||{};
+  f.appendChild(field("Ставка педагога","u-f-"+u.id,u.format,null,function(v){saveUnit(u.id,{format:v});},
+    [["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]].map(function(x){
+      var r=typeof tr[x[0]]==="number"?tr[x[0]]:(br[x[0]]||0);
+      return[x[0],x[1]+" · "+fmtMoney(r)];})));
   row.appendChild(f);
   var wdlab2=el('<label class="f">Дни недели</label>');
   wdlab2.appendChild(wdPicker(u));
