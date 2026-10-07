@@ -60,9 +60,11 @@ function groupMembers(g){
 function effTeacherId(u){var g=groupOf(u);return g?g.teacherId:u.teacherId;}
 function effWeekdays(u){var g=groupOf(u);return(g?g.weekdays:u.weekdays)||[];}
 function lessonUnit(u){return groupOf(u)||u;}
-function scheduleUnits(){
-  return groups().concat(students().filter(function(u){return !groupOf(u);}));
+/* Ученики, занимающиеся индивидуально: они сами — учебная единица. */
+function soloUnits(){
+  return students().filter(function(u){return !groupOf(u);});
 }
+function scheduleUnits(){return groups().concat(soloUnits());}
 function studentsOfTeacher(tid){
   return students().filter(function(u){return effTeacherId(u)===tid;});
 }
@@ -515,6 +517,7 @@ var REF_BLOCKS=[
   {id:"teachers",label:"Учителя"},
   {id:"students",label:"Ученики"},
   {id:"groups",label:"Группы"},
+  {id:"solos",label:"Индивидуальные занятия"},
   {id:"tariffs",label:"Тарифы клиентам"},
   {id:"rates",label:"Тарифы педагогов"},
   {id:"packages",label:"Абонементы"}
@@ -558,7 +561,7 @@ function viewRef(){
     nav.appendChild(btn);
   });
   wrap.appendChild(nav);
-  var fn={teachers:refTeachers,students:refStudents,groups:refGroups,
+  var fn={teachers:refTeachers,students:refStudents,groups:refGroups,solos:refSolos,
           tariffs:refTariffs,rates:refRates,packages:refPackages}[state.ref||"teachers"];
   wrap.appendChild((fn||refTeachers)());
   return wrap;
@@ -582,9 +585,7 @@ function refStudents(){
   var h=c.querySelector(".ref"),list=students();
   list.forEach(function(u){
     var t=state.teachers[effTeacherId(u)]||{},g=groupOf(u);
-    var rn=rateNameOf(u);
-    var meta=[t.name||"учитель не выбран",g?g.name:"",
-      rateExists(rn)?"":"ставки нет в справочнике",
+    var meta=[t.name||"педагог не выбран",g?g.name:"индивидуально",
       u.parent||"",wdText(u)].filter(Boolean).join(" · ");
     h.appendChild(acc("u:"+u.id,esc(u.name),esc(meta),function(){return unitRow(u);}));
   });
@@ -608,6 +609,37 @@ function refGroups(){
   var add=el('<button class="btn" type="button" style="justify-self:start">Добавить группу</button>');
   add.onclick=function(){addUnit("group");};h.appendChild(add);
   return c;
+}
+function refSolos(){
+  var c=el('<div class="card"><div class="chead"><h2>Индивидуальные занятия</h2>'+
+    '<span class="hint">Сюда попадает каждый ученик, не состоящий в группе</span></div><div class="ref"></div></div>');
+  var h=c.querySelector(".ref"),list=soloUnits();
+  list.forEach(function(u){
+    var t=state.teachers[u.teacherId]||{};
+    var meta=[t.name||"педагог не выбран",
+      rateExists(u.rateName)?(u.rateName||"ставка не выбрана"):"ставки нет в справочнике",
+      wdText(u)].join(" · ");
+    h.appendChild(acc("il:"+u.id,esc(u.name),esc(meta),function(){return soloLessonRow(u);}));
+  });
+  if(!list.length)h.appendChild(el('<p class="sub" style="margin:0">Все ученики занимаются в группах.</p>'));
+  return c;
+}
+/* Карточка индивидуального занятия: педагог, ставка и дни недели. */
+function soloLessonRow(u){
+  var row=el('<div class="refrow"></div>');
+  var f=el('<div class="fields"></div>');
+  f.appendChild(field("Педагог","il-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
+    [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
+  f.appendChild(field("Ставка педагога","il-rn-"+u.id,u.rateName||"",null,
+    function(v){saveUnit(u.id,{rateName:v});},rateOptions(u.rateName)));
+  f.appendChild(readField("Родитель",u.parent||"не указан"));
+  row.appendChild(f);
+  var wdlab=el('<label class="f">Дни недели</label>');
+  wdlab.appendChild(wdPicker(u));
+  row.appendChild(wdlab);
+  row.appendChild(el('<p class="sub" style="margin:0">Остаток занятий: '+fmtNum(lessonsLeft(u))+
+    " · долг: "+esc(fmtMoney(debtOf(u)))+"</p>"));
+  return row;
 }
 function refTariffs(){
   var c=el('<div class="card"><div class="chead"><h2>Тарифы клиентам</h2>'+
@@ -804,24 +836,22 @@ function unitRow(u){
       f.appendChild(readField("Ставка педагога",(g.rateName||"не выбрана")+
         (g.rateName?" · "+fmtMoney(teacherRate(g.rateName)):"")));
     }else{
-      f.appendChild(readField("Группа","не состоит"));
-      f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
-        [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
-      f.appendChild(field("Ставка педагога","u-rn-"+u.id,u.rateName||"",null,
-        function(v){saveUnit(u.id,{rateName:v});},rateOptions(u.rateName)));
+      var ti=state.teachers[u.teacherId]||{};
+      f.appendChild(readField("Группа","занимается индивидуально"));
+      f.appendChild(readField("Педагог",ti.name||"не выбран"));
+      f.appendChild(readField("Ставка педагога",(u.rateName||"не выбрана")+
+        (u.rateName?" · "+fmtMoney(teacherRate(u.rateName)):"")));
     }
     row.appendChild(f);
+    row.appendChild(readField("Дни недели",wdText(u)));
     row.appendChild(el('<p class="sub" style="margin:0">Остаток занятий: '+fmtNum(lessonsLeft(u))+
       " · долг: "+esc(fmtMoney(debtOf(u)))+"</p>"));
     if(g){
-      row.appendChild(readField("Дни недели",wdText(u)));
       var out=el('<button class="btn sm" type="button" style="justify-self:start">Убрать из группы</button>');
       out.onclick=function(){leaveGroup(g,u.id);toast(u.name+" больше не в группе");};
       row.appendChild(out);
     }else{
-      var wdlab=el('<label class="f">Дни недели</label>');
-      wdlab.appendChild(wdPicker(u));
-      row.appendChild(wdlab);
+      row.appendChild(el('<p class="sub" style="margin:0">Педагог, ставка и дни недели задаются в разделе «Индивидуальные занятия».</p>'));
     }
     return row;
   }
