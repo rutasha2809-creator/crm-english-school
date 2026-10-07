@@ -165,7 +165,6 @@ function newId(prefix){return prefix+Date.now().toString(36)+Math.floor(Math.ran
 /* ---------- абонементы и начисление ---------- */
 function packages(){return state.settings.packages||[];}
 function tariffs(){return state.settings.tariffs||[];}
-function lessonTypes(){return state.settings.lessonTypes||[];}
 /* Переименование в справочнике подхватывается всеми ссылками на старое название. */
 function renameRefs(kind,oldName,newName){
   if(!oldName||oldName===newName)return;
@@ -180,14 +179,6 @@ function renameRefs(kind,oldName,newName){
       var u=state.units[k];
       if(u[field]===oldName){var patch={};patch[field]=newName;saveUnit(u.id,patch);}
     }
-  }
-  if(kind==="lessonTypes"){
-    var ts=tariffs().map(function(x){
-      return x.lessonType===oldName?Object.assign({},x,{lessonType:newName}):x;});
-    if(JSON.stringify(ts)!==JSON.stringify(tariffs()))saveSettingList("tariffs",ts);
-    var rs=teacherTariffs().map(function(x){
-      return x.lessonType===oldName?Object.assign({},x,{lessonType:newName}):x;});
-    if(JSON.stringify(rs)!==JSON.stringify(teacherTariffs()))saveSettingList("teacherTariffs",rs);
   }
 }
 function tariffPrice(name){
@@ -620,7 +611,6 @@ var REF_BLOCKS=[
   {id:"teachers",label:"Учителя"},
   {id:"students",label:"Ученики"},
   {id:"groups",label:"Группы"},
-  {id:"types",label:"Виды занятий"},
   {id:"tariffs",label:"Тарифы клиентам"},
   {id:"rates",label:"Тарифы педагогов"},
   {id:"packages",label:"Абонементы"}
@@ -664,7 +654,7 @@ function viewRef(){
     nav.appendChild(btn);
   });
   wrap.appendChild(nav);
-  var fn={teachers:refTeachers,students:refStudents,groups:refGroups,types:refTypes,
+  var fn={teachers:refTeachers,students:refStudents,groups:refGroups,
           tariffs:refTariffs,rates:refRates,packages:refPackages}[state.ref||"teachers"];
   wrap.appendChild((fn||refTeachers)());
   return wrap;
@@ -688,8 +678,10 @@ function refStudents(){
   var h=c.querySelector(".ref"),list=students();
   list.forEach(function(u){
     var t=state.teachers[effTeacherId(u)]||{},g=groupOf(u);
-    var meta=[t.name||"учитель не выбран",g?g.name:"",u.pkg||"абонемент не выбран",
-              u.parent||"",wdText(u)].filter(Boolean).join(" · ");
+    var rn=g?g.rateName:u.rateName;
+    var meta=[t.name||"учитель не выбран",g?g.name:"",
+      rateExists(rn)?"":"ставки нет в справочнике",
+      u.pkg||"абонемент не выбран",u.parent||"",wdText(u)].filter(Boolean).join(" · ");
     h.appendChild(acc("u:"+u.id,esc(u.name),esc(meta),function(){return unitRow(u);}));
   });
   if(!list.length)h.appendChild(el('<p class="sub" style="margin:0">Пока ни одного ученика.</p>'));
@@ -703,7 +695,9 @@ function refGroups(){
   var h=c.querySelector(".ref"),list=groups();
   list.forEach(function(g){
     var t=state.teachers[g.teacherId]||{};
-    var meta=[t.name||"учитель не выбран",groupMembers(g).length+" чел.",wdText(g)].join(" · ");
+    var meta=[t.name||"учитель не выбран",
+      rateExists(g.rateName)?(g.rateName||"ставка не выбрана"):"ставки нет в справочнике",
+      groupMembers(g).length+" чел.",wdText(g)].join(" · ");
     h.appendChild(acc("g:"+g.id,esc(g.name),esc(meta),function(){return unitRow(g);}));
   });
   if(!list.length)h.appendChild(el('<p class="sub" style="margin:0">Пока ни одной группы.</p>'));
@@ -711,42 +705,14 @@ function refGroups(){
   add.onclick=function(){addUnit("group");};h.appendChild(add);
   return c;
 }
-function typeOptions(){
-  return[["","— не указан —"]].concat(lessonTypes().map(function(x){return[x.name,x.name];}));
-}
-function refTypes(){
-  var c=el('<div class="card"><div class="chead"><h2>Виды занятий</h2>'+
-    '<span class="hint">Используются в тарифах и в отчётах</span></div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Тарифов клиентам</th>'+
-    '<th class="r">Тарифов педагогов</th><th></th></tr></thead><tbody></tbody></table>');
-  var tb=tbl.querySelector("tbody"),list=lessonTypes();
-  list.forEach(function(x,i){
-    var tr=document.createElement("tr");
-    tr.appendChild(settingCell("lessonTypes",i,"name",x.name,"text",280));
-    tr.appendChild(el('<td class="r sub">'+tariffs().filter(function(t){return t.lessonType===x.name;}).length+"</td>"));
-    tr.appendChild(el('<td class="r sub">'+teacherTariffs().filter(function(t){return t.lessonType===x.name;}).length+"</td>"));
-    var td=document.createElement("td");
-    var rm=el('<button class="btn sm" type="button">Удалить</button>');
-    rm.onclick=function(){var l=lessonTypes().slice();l.splice(i,1);saveSettingList("lessonTypes",l);};
-    td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
-  });
-  if(!list.length)tb.appendChild(el('<tr><td colspan="4" class="sub">Пока ни одного вида.</td></tr>'));
-  var trAdd=el('<tr><td colspan="4"></td></tr>');
-  var add=el('<button class="btn sm" type="button">Добавить вид занятий</button>');
-  add.onclick=function(){saveSettingList("lessonTypes",lessonTypes().concat([{name:"Новый вид"}]));};
-  trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
-  c.querySelector(".tscroll").appendChild(tbl);
-  return c;
-}
 function refTariffs(){
   var c=el('<div class="card"><div class="chead"><h2>Тарифы клиентам</h2>'+
     '<span class="hint">Цена одного занятия для ученика</span></div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr><th>Название</th><th>Вид занятий</th><th class="r">Минут</th><th class="r">Цена занятия</th><th></th></tr></thead><tbody></tbody></table>');
+  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Минут</th><th class="r">Цена занятия</th><th></th></tr></thead><tbody></tbody></table>');
   var tb=tbl.querySelector("tbody");
   tariffs().forEach(function(x,i){
     var tr=document.createElement("tr");
-    tr.appendChild(settingCell("tariffs",i,"name",x.name,"text",230));
-    tr.appendChild(settingSelect("tariffs",i,"lessonType",x.lessonType,typeOptions()));
+    tr.appendChild(settingCell("tariffs",i,"name",x.name,"text",280));
     tr.appendChild(settingCell("tariffs",i,"minutes",x.minutes,"number",70));
     tr.appendChild(settingCell("tariffs",i,"price",x.price,"number",96));
     var td=document.createElement("td");
@@ -754,9 +720,9 @@ function refTariffs(){
     rm.onclick=function(){var l=tariffs().slice();l.splice(i,1);saveSettingList("tariffs",l);};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
-  var trAdd=el('<tr><td colspan="5"></td></tr>');
+  var trAdd=el('<tr><td colspan="4"></td></tr>');
   var add=el('<button class="btn sm" type="button">Добавить тариф</button>');
-  add.onclick=function(){saveSettingList("tariffs",tariffs().concat([{name:"Новый тариф",lessonType:"",minutes:45,price:2000}]));};
+  add.onclick=function(){saveSettingList("tariffs",tariffs().concat([{name:"Новый тариф",minutes:45,price:2000}]));};
   trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
   c.querySelector(".tscroll").appendChild(tbl);
   return c;
@@ -764,36 +730,41 @@ function refTariffs(){
 function refRates(){
   var c=el('<div class="card"><div class="chead"><h2>Тарифы педагогов</h2>'+
     '<span class="hint">Сколько школа платит педагогу за одно занятие</span></div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr><th>Название</th><th>Вид занятий</th><th class="r">Ставка за занятие</th><th></th></tr></thead><tbody></tbody></table>');
+  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Ставка за занятие</th><th></th></tr></thead><tbody></tbody></table>');
   var tb=tbl.querySelector("tbody"),list=teacherTariffs();
   list.forEach(function(x,i){
     var tr=document.createElement("tr");
-    tr.appendChild(settingCell("teacherTariffs",i,"name",x.name,"text",260));
-    tr.appendChild(settingSelect("teacherTariffs",i,"lessonType",x.lessonType,typeOptions()));
+    tr.appendChild(settingCell("teacherTariffs",i,"name",x.name,"text",300));
     tr.appendChild(settingCell("teacherTariffs",i,"price",x.price,"number",110));
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
     rm.onclick=function(){var l=teacherTariffs().slice();l.splice(i,1);saveSettingList("teacherTariffs",l);};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
-  if(!list.length)tb.appendChild(el('<tr><td colspan="4" class="sub">Пока ни одного тарифа.</td></tr>'));
-  var trAdd=el('<tr><td colspan="4"></td></tr>');
+  if(!list.length)tb.appendChild(el('<tr><td colspan="3" class="sub">Пока ни одного тарифа.</td></tr>'));
+  var trAdd=el('<tr><td colspan="3"></td></tr>');
   var add=el('<button class="btn sm" type="button">Добавить тариф</button>');
-  add.onclick=function(){saveSettingList("teacherTariffs",teacherTariffs().concat([{name:"Новый тариф",lessonType:"",price:1000}]));};
+  add.onclick=function(){saveSettingList("teacherTariffs",teacherTariffs().concat([{name:"Новый тариф",price:1000}]));};
   trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
   c.querySelector(".tscroll").appendChild(tbl);
   return c;
 }
-function rateOptions(){
-  return[["","— без тарифа —"]].concat(teacherTariffs().map(function(x){
+function rateExists(name){
+  return !name||teacherTariffs().some(function(x){return x.name===name;});
+}
+function rateOptions(current){
+  var opts=[["","— без тарифа —"]].concat(teacherTariffs().map(function(x){
     return[x.name,x.name+" · "+fmtMoney(x.price)];}));
+  /* если назначенный тариф удалён из справочника, не теряем его молча */
+  if(current&&!rateExists(current))opts.push([current,current+" — тарифа нет в справочнике"]);
+  return opts;
 }
 function refPackages(){
   var c=el('<div class="card"><div class="chead"><h2>Абонементы</h2>'+
     '<span class="hint">Стоимость = количество занятий × стоимость урока минус скидка</span>'+
     '</div><div class="tscroll"></div></div>');
   var tbl=el('<table><thead><tr>'+
-    '<th>Название</th><th>Вид занятий</th><th class="r">Количество занятий</th>'+
+    '<th>Название</th><th>Тариф ученика</th><th class="r">Количество занятий</th>'+
     '<th class="r">Стоимость урока</th><th class="r">Скидка, %</th>'+
     '<th class="r">Стоимость абонемента</th><th></th>'+
     "</tr></thead><tbody></tbody></table>");
@@ -941,7 +912,7 @@ function unitRow(u){
       f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
         [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
       f.appendChild(field("Ставка педагога","u-rn-"+u.id,u.rateName||"",null,
-        function(v){saveUnit(u.id,{rateName:v});},rateOptions()));
+        function(v){saveUnit(u.id,{rateName:v});},rateOptions(u.rateName)));
     }
     f.appendChild(field("Абонемент","u-pkg-"+u.id,u.pkg||"",null,function(v){saveUnit(u.id,{pkg:v});},
       [["","— без абонемента —"]].concat(packages().map(function(x){
@@ -964,7 +935,7 @@ function unitRow(u){
   f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
     [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
   f.appendChild(field("Ставка педагога","u-rn-"+u.id,u.rateName||"",null,
-    function(v){saveUnit(u.id,{rateName:v});},rateOptions()));
+    function(v){saveUnit(u.id,{rateName:v});},rateOptions(u.rateName)));
   row.appendChild(f);
   var wdlab2=el('<label class="f">Дни недели</label>');
   wdlab2.appendChild(wdPicker(u));
@@ -1311,7 +1282,7 @@ var API={
       var s=r[2].error?null:r[2].data;
       return{teachers:teachers,units:units,
         settings:s?{tariffs:s.tariffs||[],packages:s.packages||[],
-          teacherTariffs:s.teacher_tariffs||[],lessonTypes:s.lesson_types||[]}:{}};
+          teacherTariffs:s.teacher_tariffs||[]}:{}};
     });
   },
   loadRange:function(from,to){
@@ -1356,7 +1327,7 @@ var API={
   saveSettings:function(s){
     return sb.from("oe_settings").upsert({owner:session.user.id,
       tariffs:s.tariffs||[],packages:s.packages||[],
-      teacher_tariffs:s.teacherTariffs||[],lesson_types:s.lessonTypes||[]},
+      teacher_tariffs:s.teacherTariffs||[]},
       {onConflict:"owner"}).then(oops);
   }
 };
