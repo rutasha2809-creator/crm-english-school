@@ -200,3 +200,10 @@ h1 span{font-size:12.5px}
 .sub-acc>.acchead{padding:7px 10px}
 .sub-acc .acctitle{font-weight:500}
 .accbody .refrow{border:0;padding:0}
+
+/* поля только для чтения и состав группы */
+.readval{font-family:var(--font-body);font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 8px;background:var(--surface-2);min-height:29px;display:flex;align-items:center}
+.memrow{display:grid;grid-template-columns:1.3fr 1fr 1fr auto;gap:8px;align-items:center;padding:5px 8px;border:1px solid var(--line);border-radius:7px;min-width:0}
+.memrow>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.memname{font-family:var(--font-ui);font-weight:500;font-size:13px}
+@media(max-width:620px){.memrow{grid-template-columns:1fr auto}.memrow>.sub:nth-child(3){display:none}}
