@@ -11,7 +11,7 @@ var STATUS_ORDER_FREE=["none","done","pc"];
 var MARK={plan:"",done:"✓",pc:"₽",c:"×",off:"–"};
 var CLS={plan:"c-plan",done:"c-done",pc:"c-pc",c:"c-c",off:"c-off"};
 
-var state={tab:"month",ref:"teachers",ym:null,teachers:{},units:{},months:{},payouts:{},settings:{},ready:false,err:null};
+var state={tab:"month",ref:"teachers",rep:{from:null,to:null,loaded:"",busy:false},ym:null,teachers:{},units:{},months:{},payouts:{},settings:{},ready:false,err:null};
 
 
 /* ---------- helpers ---------- */
@@ -165,6 +165,31 @@ function newId(prefix){return prefix+Date.now().toString(36)+Math.floor(Math.ran
 /* ---------- абонементы и начисление ---------- */
 function packages(){return state.settings.packages||[];}
 function tariffs(){return state.settings.tariffs||[];}
+function lessonTypes(){return state.settings.lessonTypes||[];}
+/* Переименование в справочнике подхватывается всеми ссылками на старое название. */
+function renameRefs(kind,oldName,newName){
+  if(!oldName||oldName===newName)return;
+  if(kind==="tariffs"){
+    var ps=packages().map(function(x){
+      return x.tariff===oldName?Object.assign({},x,{tariff:newName}):x;});
+    if(JSON.stringify(ps)!==JSON.stringify(packages()))saveSettingList("packages",ps);
+  }
+  if(kind==="packages"||kind==="teacherTariffs"){
+    var field=kind==="packages"?"pkg":"rateName";
+    for(var k in state.units){
+      var u=state.units[k];
+      if(u[field]===oldName){var patch={};patch[field]=newName;saveUnit(u.id,patch);}
+    }
+  }
+  if(kind==="lessonTypes"){
+    var ts=tariffs().map(function(x){
+      return x.lessonType===oldName?Object.assign({},x,{lessonType:newName}):x;});
+    if(JSON.stringify(ts)!==JSON.stringify(tariffs()))saveSettingList("tariffs",ts);
+    var rs=teacherTariffs().map(function(x){
+      return x.lessonType===oldName?Object.assign({},x,{lessonType:newName}):x;});
+    if(JSON.stringify(rs)!==JSON.stringify(teacherTariffs()))saveSettingList("teacherTariffs",rs);
+  }
+}
 function tariffPrice(name){
   var t=tariffs().filter(function(x){return x.name===name;})[0];
   return t?(+t.price||0):0;
@@ -231,6 +256,7 @@ var TABS=[
   {id:"journal",label:"Журнал занятий"},
   {id:"schedule",label:"Расписание по дням"},
   {id:"money",label:"Абонементы и оплаты"},
+  {id:"reports",label:"Отчёты"},
   {id:"ref",label:"Справочники"}
 ];
 function renderTabs(){
@@ -594,6 +620,7 @@ var REF_BLOCKS=[
   {id:"teachers",label:"Учителя"},
   {id:"students",label:"Ученики"},
   {id:"groups",label:"Группы"},
+  {id:"types",label:"Виды занятий"},
   {id:"tariffs",label:"Тарифы клиентам"},
   {id:"rates",label:"Тарифы педагогов"},
   {id:"packages",label:"Абонементы"}
@@ -637,7 +664,7 @@ function viewRef(){
     nav.appendChild(btn);
   });
   wrap.appendChild(nav);
-  var fn={teachers:refTeachers,students:refStudents,groups:refGroups,
+  var fn={teachers:refTeachers,students:refStudents,groups:refGroups,types:refTypes,
           tariffs:refTariffs,rates:refRates,packages:refPackages}[state.ref||"teachers"];
   wrap.appendChild((fn||refTeachers)());
   return wrap;
@@ -684,14 +711,42 @@ function refGroups(){
   add.onclick=function(){addUnit("group");};h.appendChild(add);
   return c;
 }
+function typeOptions(){
+  return[["","— не указан —"]].concat(lessonTypes().map(function(x){return[x.name,x.name];}));
+}
+function refTypes(){
+  var c=el('<div class="card"><div class="chead"><h2>Виды занятий</h2>'+
+    '<span class="hint">Используются в тарифах и в отчётах</span></div><div class="tscroll"></div></div>');
+  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Тарифов клиентам</th>'+
+    '<th class="r">Тарифов педагогов</th><th></th></tr></thead><tbody></tbody></table>');
+  var tb=tbl.querySelector("tbody"),list=lessonTypes();
+  list.forEach(function(x,i){
+    var tr=document.createElement("tr");
+    tr.appendChild(settingCell("lessonTypes",i,"name",x.name,"text",280));
+    tr.appendChild(el('<td class="r sub">'+tariffs().filter(function(t){return t.lessonType===x.name;}).length+"</td>"));
+    tr.appendChild(el('<td class="r sub">'+teacherTariffs().filter(function(t){return t.lessonType===x.name;}).length+"</td>"));
+    var td=document.createElement("td");
+    var rm=el('<button class="btn sm" type="button">Удалить</button>');
+    rm.onclick=function(){var l=lessonTypes().slice();l.splice(i,1);saveSettingList("lessonTypes",l);};
+    td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
+  });
+  if(!list.length)tb.appendChild(el('<tr><td colspan="4" class="sub">Пока ни одного вида.</td></tr>'));
+  var trAdd=el('<tr><td colspan="4"></td></tr>');
+  var add=el('<button class="btn sm" type="button">Добавить вид занятий</button>');
+  add.onclick=function(){saveSettingList("lessonTypes",lessonTypes().concat([{name:"Новый вид"}]));};
+  trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
+  c.querySelector(".tscroll").appendChild(tbl);
+  return c;
+}
 function refTariffs(){
   var c=el('<div class="card"><div class="chead"><h2>Тарифы клиентам</h2>'+
     '<span class="hint">Цена одного занятия для ученика</span></div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Минут</th><th class="r">Цена занятия</th><th></th></tr></thead><tbody></tbody></table>');
+  var tbl=el('<table><thead><tr><th>Название</th><th>Вид занятий</th><th class="r">Минут</th><th class="r">Цена занятия</th><th></th></tr></thead><tbody></tbody></table>');
   var tb=tbl.querySelector("tbody");
   tariffs().forEach(function(x,i){
     var tr=document.createElement("tr");
     tr.appendChild(settingCell("tariffs",i,"name",x.name,"text",230));
+    tr.appendChild(settingSelect("tariffs",i,"lessonType",x.lessonType,typeOptions()));
     tr.appendChild(settingCell("tariffs",i,"minutes",x.minutes,"number",70));
     tr.appendChild(settingCell("tariffs",i,"price",x.price,"number",96));
     var td=document.createElement("td");
@@ -699,9 +754,9 @@ function refTariffs(){
     rm.onclick=function(){var l=tariffs().slice();l.splice(i,1);saveSettingList("tariffs",l);};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
-  var trAdd=el('<tr><td colspan="4"></td></tr>');
+  var trAdd=el('<tr><td colspan="5"></td></tr>');
   var add=el('<button class="btn sm" type="button">Добавить тариф</button>');
-  add.onclick=function(){saveSettingList("tariffs",tariffs().concat([{name:"Новый тариф",minutes:45,price:2000}]));};
+  add.onclick=function(){saveSettingList("tariffs",tariffs().concat([{name:"Новый тариф",lessonType:"",minutes:45,price:2000}]));};
   trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
   c.querySelector(".tscroll").appendChild(tbl);
   return c;
@@ -709,21 +764,22 @@ function refTariffs(){
 function refRates(){
   var c=el('<div class="card"><div class="chead"><h2>Тарифы педагогов</h2>'+
     '<span class="hint">Сколько школа платит педагогу за одно занятие</span></div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Ставка за занятие</th><th></th></tr></thead><tbody></tbody></table>');
+  var tbl=el('<table><thead><tr><th>Название</th><th>Вид занятий</th><th class="r">Ставка за занятие</th><th></th></tr></thead><tbody></tbody></table>');
   var tb=tbl.querySelector("tbody"),list=teacherTariffs();
   list.forEach(function(x,i){
     var tr=document.createElement("tr");
     tr.appendChild(settingCell("teacherTariffs",i,"name",x.name,"text",260));
+    tr.appendChild(settingSelect("teacherTariffs",i,"lessonType",x.lessonType,typeOptions()));
     tr.appendChild(settingCell("teacherTariffs",i,"price",x.price,"number",110));
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
     rm.onclick=function(){var l=teacherTariffs().slice();l.splice(i,1);saveSettingList("teacherTariffs",l);};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
-  if(!list.length)tb.appendChild(el('<tr><td colspan="3" class="sub">Пока ни одного тарифа.</td></tr>'));
-  var trAdd=el('<tr><td colspan="3"></td></tr>');
+  if(!list.length)tb.appendChild(el('<tr><td colspan="4" class="sub">Пока ни одного тарифа.</td></tr>'));
+  var trAdd=el('<tr><td colspan="4"></td></tr>');
   var add=el('<button class="btn sm" type="button">Добавить тариф</button>');
-  add.onclick=function(){saveSettingList("teacherTariffs",teacherTariffs().concat([{name:"Новый тариф",price:1000}]));};
+  add.onclick=function(){saveSettingList("teacherTariffs",teacherTariffs().concat([{name:"Новый тариф",lessonType:"",price:1000}]));};
   trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
   c.querySelector(".tscroll").appendChild(tbl);
   return c;
@@ -773,9 +829,11 @@ function settingCell(listName,idx,field,value,type,width){
   i.value=value==null?"":value;
   i.onchange=function(){
     var l=(state.settings[listName]||[]).slice();
+    var was=l[idx]&&l[idx][field];
     l[idx]=Object.assign({},l[idx]);
     l[idx][field]=type==="number"?(+i.value||0):i.value;
     saveSettingList(listName,l);
+    if(field==="name")renameRefs(listName,was,l[idx].name);
   };
   td.appendChild(i);return td;
 }
@@ -923,6 +981,25 @@ function unitRow(u){
     mr.appendChild(rm);mems.appendChild(mr);
   });
   if(!groupMembers(u).length)mems.appendChild(el('<p class="sub" style="margin:0">Пока никого.</p>'));
+  /* назначить абонемент всем участникам сразу */
+  var bulk=el('<label class="f">Абонемент всем участникам</label>');
+  var bsel=document.createElement("select");
+  bsel.id="gpkg-"+u.id;
+  [["","— выбрать абонемент —"]].concat(packages().map(function(x){
+    return[x.name,x.name+" · "+(x.lessons||0)+" зан. · "+fmtMoney(packageTotal(x))];
+  })).forEach(function(o){
+    var op=document.createElement("option");op.value=o[0];op.textContent=o[1];bsel.appendChild(op);
+  });
+  bsel.onchange=function(){
+    if(!bsel.value)return;
+    var ms=groupMembers(u),n=0;
+    ms.forEach(function(m){if(m.pkg!==bsel.value){saveUnit(m.id,{pkg:bsel.value});n++;}});
+    toast(n?"Абонемент назначен: "+n+" уч.":"У всех уже этот абонемент");
+    bsel.value="";
+  };
+  bulk.appendChild(bsel);
+  row.appendChild(bulk);
+
   var free=students().filter(function(s){return !s.groupId;});
   var addRow=el('<div class="btnrow" style="margin-top:2px"></div>');
   var pick=document.createElement("select");
@@ -980,7 +1057,8 @@ function addTeacher(){
 }
 
 /* ---------- render ---------- */
-var VIEWS={month:viewMonth,journal:viewJournal,schedule:viewSchedule,money:viewMoney,ref:viewRef};
+var VIEWS={month:viewMonth,journal:viewJournal,schedule:viewSchedule,money:viewMoney,
+           reports:viewReports,ref:viewRef};
 function render(){
   renderTabs();
   var main=document.getElementById("main");
@@ -994,12 +1072,191 @@ function render(){
     main.appendChild(el('<div class="card"><div class="boot"><b>Пока пусто</b>Начните со справочников: добавьте учителей, тарифы и учеников.</div></div>'));
     return;
   }
+  if(state.tab==="reports")loadReport();
   try{main.appendChild(VIEWS[state.tab]());}
   catch(e){main.appendChild(el('<div class="boot"><b>Ошибка на этом экране</b>'+esc(String(e&&e.message||e))+"</div>"));}
   var sub=document.getElementById("h-sub");
   sub.textContent=session&&session.user?session.user.email:"";
   window.scrollTo(sx,sy);
   if(aid){var n=document.getElementById(aid);if(n&&n.focus){n.focus();if(ss!=null&&"setSelectionRange" in n){try{n.setSelectionRange(ss,ss);}catch(e){}}}}
+}
+/* ---------- экран: отчёты ---------- */
+function ymRange(from,to){
+  var out=[],cur=from;
+  if(!from||!to||from>to)return out;
+  for(var i=0;i<60&&cur<=to;i++){out.push(cur);cur=ymShift(cur,1);}
+  return out;
+}
+function repFrom(){return state.rep.from||ymShift(state.ym,-2);}
+function repTo(){return state.rep.to||state.ym;}
+function loadReport(){
+  var from=repFrom(),to=repTo(),key=from+".."+to;
+  if(state.rep.loaded===key||state.rep.busy)return;
+  state.rep.busy=true;
+  API.loadRange(from,to).then(function(d){
+    Object.assign(state.months,d.months);
+    Object.assign(state.payouts,d.payouts);
+    state.rep.busy=false;state.rep.loaded=key;render();
+  },function(e){state.rep.busy=false;saveFailed(e);});
+}
+/* Месяц считается только если по нему что-то вносили: есть карточка начисления
+   или отмечены занятия. Иначе абонемент подставил бы суммы в пустые месяцы. */
+function hasRecord(u,ym){
+  if(state.months[ym+"__"+u.id])return true;
+  var lu=lessonUnit(u);
+  return Object.keys((mdoc(lu,ym).days)||{}).length>0;
+}
+/* Итоги одного месяца: начисления по ученикам и выплаты по учебным единицам. */
+function monthTotals(ym){
+  var t={charge:0,amount:0,lessons:0,done:0,payout:0,paid:0};
+  students().forEach(function(u){
+    if(!hasRecord(u,ym))return;
+    var b=billing(u,ym);
+    t.charge+=b.charge;t.amount+=b.amount;t.lessons+=b.lessons;
+  });
+  scheduleUnits().forEach(function(lu){
+    var s=unitStats(lu,ym);t.done+=s.paidLessons;t.payout+=s.payout;
+  });
+  teacherList().forEach(function(x){
+    var pd=state.payouts[ym+"__"+x.id]||{};t.paid+=+pd.paid||0;
+  });
+  t.profit=t.charge-t.payout;
+  return t;
+}
+function csvCell(v){
+  var s=String(v==null?"":v);
+  return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+}
+function downloadCsv(name,rows){
+  var csv=rows.map(function(r){return r.map(csvCell).join(";");}).join("\r\n");
+  var blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement("a");
+  a.href=url;a.download=String(name).replace(/[^\wА-Яа-яёЁ.-]+/g,"_")+".csv";
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);a.remove();},0);
+  toast("Файл скачан");
+}
+function repCard(title,hint,headers,rows,totalRow,fileName){
+  var c=el('<div class="card"><div class="chead"><h2>'+esc(title)+'</h2>'+
+    (hint?'<span class="hint">'+esc(hint)+"</span>":"")+"</div></div>");
+  var bar=el('<div class="btnrow" style="padding:10px 14px 0"></div>');
+  var dl=el('<button class="btn sm" type="button">Скачать Excel</button>');
+  dl.onclick=function(){
+    var data=[headers].concat(rows.map(function(r){return r.map(function(c2){return c2.v;});}));
+    if(totalRow)data.push(totalRow.map(function(c2){return c2.v;}));
+    downloadCsv(fileName,data);
+  };
+  bar.appendChild(dl);c.appendChild(bar);
+  var scroll=el('<div class="tscroll"></div>');
+  var tbl=document.createElement("table");
+  var thead=el("<thead><tr>"+headers.map(function(h,i){
+    return'<th'+(i?' class="r"':"")+">"+esc(h)+"</th>";}).join("")+"</tr></thead>");
+  tbl.appendChild(thead);
+  var tb=document.createElement("tbody");
+  rows.forEach(function(r){
+    tb.appendChild(el("<tr>"+r.map(function(c2,i){
+      return"<td"+(i?' class="r"':"")+">"+esc(c2.t==null?c2.v:c2.t)+"</td>";}).join("")+"</tr>"));
+  });
+  if(!rows.length)tb.appendChild(el('<tr><td colspan="'+headers.length+'" class="sub">Нет данных за выбранный период.</td></tr>'));
+  if(totalRow)tb.appendChild(el('<tr class="tot">'+totalRow.map(function(c2,i){
+    return"<td"+(i?' class="r"':"")+">"+esc(c2.t==null?c2.v:c2.t)+"</td>";}).join("")+"</tr>"));
+  tbl.appendChild(tb);scroll.appendChild(tbl);c.appendChild(scroll);
+  return c;
+}
+function viewReports(){
+  var wrap=el('<div class="stack"></div>');
+  var from=repFrom(),to=repTo(),list=ymRange(from,to);
+
+  /* выбор периода */
+  var head=el('<div class="card"><div class="chead"><h2>Период</h2>'+
+    '<span class="hint">Отчёты строятся по выбранным месяцам</span></div></div>');
+  var picks=el('<div class="ref" style="grid-auto-flow:column;justify-content:start;gap:12px;align-items:end"></div>');
+  function monthOptions(){
+    var opts=[],cur=ymShift(ymOf(new Date()),-23);
+    for(var i=0;i<36;i++){opts.push([cur,ymLabel(cur)]);cur=ymShift(cur,1);}
+    return opts;
+  }
+  picks.appendChild(field("С месяца","rep-from",from,null,function(v){
+    state.rep.from=v;if(v>repTo())state.rep.to=v;render();loadReport();},monthOptions()));
+  picks.appendChild(field("По месяц","rep-to",to,null,function(v){
+    state.rep.to=v;if(v<repFrom())state.rep.from=v;render();loadReport();},monthOptions()));
+  head.appendChild(picks);
+  wrap.appendChild(head);
+
+  if(state.rep.busy||state.rep.loaded!==from+".."+to){
+    wrap.appendChild(el('<div class="card"><div class="boot"><b>Считаю отчёты</b>Секунду.</div></div>'));
+    return wrap;
+  }
+
+  /* 1. финансовый итог по месяцам */
+  var T={charge:0,amount:0,payout:0,paid:0,done:0,lessons:0,profit:0};
+  var fin=list.map(function(ym){
+    var m=monthTotals(ym);
+    ["charge","amount","payout","paid","done","lessons","profit"].forEach(function(k){T[k]+=m[k];});
+    return[{v:ymLabel(ym)},{v:m.lessons},{v:m.done},
+      {v:m.charge,t:fmtMoney(m.charge)},{v:m.amount,t:fmtMoney(m.amount)},
+      {v:m.charge-m.amount,t:fmtMoney(m.charge-m.amount)},
+      {v:m.payout,t:fmtMoney(m.payout)},{v:m.paid,t:fmtMoney(m.paid)},
+      {v:m.profit,t:fmtMoney(m.profit)}];
+  });
+  wrap.appendChild(repCard("Финансовый итог за период",
+    "Начислено — по абонементам; к выплате — по проведённым занятиям",
+    ["Месяц","Занятий к оплате","Проведено","Начислено","Получено","Остаток",
+     "К выплате педагогам","Выплачено","Заработок школы"],
+    fin,
+    [{v:"Итого"},{v:T.lessons},{v:T.done},
+     {v:T.charge,t:fmtMoney(T.charge)},{v:T.amount,t:fmtMoney(T.amount)},
+     {v:T.charge-T.amount,t:fmtMoney(T.charge-T.amount)},
+     {v:T.payout,t:fmtMoney(T.payout)},{v:T.paid,t:fmtMoney(T.paid)},
+     {v:T.profit,t:fmtMoney(T.profit)}],
+    "Финансовый_итог_"+from+"_"+to));
+
+  /* 2. долги родителей */
+  var debts=[],dTot=0;
+  students().forEach(function(u){
+    list.forEach(function(ym){
+      if(!hasRecord(u,ym))return;
+      var b=billing(u,ym);
+      if(b.left<=0)return;
+      var t=state.teachers[effTeacherId(u)]||{},g=groupOf(u);
+      dTot+=b.left;
+      debts.push([{v:u.name},{v:u.parent||""},{v:g?g.name:""},{v:t.name||""},
+        {v:ymLabel(ym)},{v:b.charge,t:fmtMoney(b.charge)},
+        {v:b.amount,t:fmtMoney(b.amount)},{v:b.left,t:fmtMoney(b.left)}]);
+    });
+  });
+  debts.sort(function(a,b){return b[7].v-a[7].v;});
+  wrap.appendChild(repCard("Долги родителей","Только месяцы, где начислено больше, чем получено",
+    ["Ученик","Родитель","Группа","Педагог","Месяц","Начислено","Оплачено","Остаток"],
+    debts,[{v:"Итого"},{v:""},{v:""},{v:""},{v:""},{v:""},{v:""},{v:dTot,t:fmtMoney(dTot)}],
+    "Долги_родителей_"+from+"_"+to));
+
+  /* 3. по педагогам */
+  var byT=[],P={done:0,payout:0,paid:0,charge:0};
+  teacherList().forEach(function(t){
+    var done=0,payout=0,paid=0,charge=0;
+    list.forEach(function(ym){
+      lessonUnitsOf(t.id).forEach(function(lu){
+        var s=unitStats(lu,ym);done+=s.paidLessons;payout+=s.payout;
+      });
+      studentsOfTeacher(t.id).forEach(function(u){
+        if(hasRecord(u,ym))charge+=billing(u,ym).charge;});
+      var pd=state.payouts[ym+"__"+t.id]||{};paid+=+pd.paid||0;
+    });
+    if(!done&&!payout&&!charge&&!paid)return;
+    P.done+=done;P.payout+=payout;P.paid+=paid;P.charge+=charge;
+    byT.push([{v:t.name},{v:done},{v:payout,t:fmtMoney(payout)},{v:paid,t:fmtMoney(paid)},
+      {v:payout-paid,t:fmtMoney(payout-paid)},{v:charge,t:fmtMoney(charge)},
+      {v:charge-payout,t:fmtMoney(charge-payout)}]);
+  });
+  wrap.appendChild(repCard("По педагогам","Начислено — по ученикам этого педагога",
+    ["Педагог","Проведено","К выплате","Выплачено","Осталось выплатить","Начислено ученикам","Заработок школы"],
+    byT,[{v:"Итого"},{v:P.done},{v:P.payout,t:fmtMoney(P.payout)},{v:P.paid,t:fmtMoney(P.paid)},
+      {v:P.payout-P.paid,t:fmtMoney(P.payout-P.paid)},{v:P.charge,t:fmtMoney(P.charge)},
+      {v:P.charge-P.payout,t:fmtMoney(P.charge-P.payout)}],
+    "По_педагогам_"+from+"_"+to));
+  return wrap;
 }
 /* ---------- Supabase ---------- */
 var sb=null,session=null;
@@ -1054,7 +1311,18 @@ var API={
       var s=r[2].error?null:r[2].data;
       return{teachers:teachers,units:units,
         settings:s?{tariffs:s.tariffs||[],packages:s.packages||[],
-          teacherTariffs:s.teacher_tariffs||[]}:{}};
+          teacherTariffs:s.teacher_tariffs||[],lessonTypes:s.lesson_types||[]}:{}};
+    });
+  },
+  loadRange:function(from,to){
+    return Promise.all([
+      sb.from("oe_months").select("*").gte("month",from).lte("month",to),
+      sb.from("oe_payouts").select("*").gte("month",from).lte("month",to)
+    ]).then(function(r){
+      var months={},payouts={};
+      oops(r[0]).forEach(function(row){months[row.month+"__"+row.unit_id]=monthFromRow(row);});
+      oops(r[1]).forEach(function(row){payouts[row.month+"__"+row.teacher_id]=payoutFromRow(row);});
+      return{months:months,payouts:payouts};
     });
   },
   loadMonth:function(ym){
@@ -1088,7 +1356,8 @@ var API={
   saveSettings:function(s){
     return sb.from("oe_settings").upsert({owner:session.user.id,
       tariffs:s.tariffs||[],packages:s.packages||[],
-      teacher_tariffs:s.teacherTariffs||[]},{onConflict:"owner"}).then(oops);
+      teacher_tariffs:s.teacherTariffs||[],lesson_types:s.lessonTypes||[]},
+      {onConflict:"owner"}).then(oops);
   }
 };
 
