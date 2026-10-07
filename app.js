@@ -69,15 +69,19 @@ function scheduleUnits(){
 function studentsOfTeacher(tid){
   return students().filter(function(u){return effTeacherId(u)===tid;});
 }
-function baseRates(){return(state.settings.baseRates)||{individual:1000,mini:1500,group:1000};}
-/* Ставка педагога живёт только в справочнике «Тарифы педагогов»:
-   личная ставка учителя, иначе базовая ставка по формату занятия. */
-function rateOf(lu){
-  var fmt=lu.kind==="group"?(lu.format||"group"):effFormat(lu);
-  var t=state.teachers[lu.kind==="group"?lu.teacherId:effTeacherId(lu)];
-  if(t&&t.rates&&typeof t.rates[fmt]==="number")return t.rates[fmt];
-  var b=baseRates();return b[fmt]||0;
+/* Ставка педагога — название из справочника «Тарифы педагогов»,
+   назначенное группе или индивидуальному ученику. */
+function teacherTariffs(){return state.settings.teacherTariffs||[];}
+function teacherRate(name){
+  var t=teacherTariffs().filter(function(x){return x.name===name;})[0];
+  return t?(+t.price||0):0;
 }
+function rateNameOf(lu){
+  if(lu.kind==="group")return lu.rateName||"";
+  var g=groupOf(lu);
+  return g?(g.rateName||""):(lu.rateName||"");
+}
+function rateOf(lu){return teacherRate(rateNameOf(lu));}
 function mdoc(u,ym){return state.months[(ym||state.ym)+"__"+u.id]||{days:{},pay:{}};}
 function planDays(u,ym){
   var wd=u.kind==="group"?(u.weekdays||[]):effWeekdays(u),out=[];
@@ -704,50 +708,29 @@ function refTariffs(){
 }
 function refRates(){
   var c=el('<div class="card"><div class="chead"><h2>Тарифы педагогов</h2>'+
-    '<span class="hint">Сколько школа платит педагогу за одно занятие</span></div></div>');
-  var b=baseRates(),box=el('<div class="ref"></div>');
-  box.appendChild(el('<h3 class="refh">Базовые ставки</h3>'));
-  var f=el('<div class="fields"></div>');
-  var FMT=[["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]];
-  FMT.forEach(function(pr){
-    var lab=el('<label class="f">'+esc(pr[1])+", ₽</label>");
-    var inp=document.createElement("input");inp.type="number";inp.min="0";inp.step="50";
-    inp.id="br-"+pr[0];inp.value=b[pr[0]]||0;
-    inp.onchange=function(){
-      var nb=Object.assign({},baseRates());nb[pr[0]]=+inp.value||0;
-      saveSettingList("baseRates",nb);
-    };
-    lab.appendChild(inp);f.appendChild(lab);
+    '<span class="hint">Сколько школа платит педагогу за одно занятие</span></div><div class="tscroll"></div></div>');
+  var tbl=el('<table><thead><tr><th>Название</th><th class="r">Ставка за занятие</th><th></th></tr></thead><tbody></tbody></table>');
+  var tb=tbl.querySelector("tbody"),list=teacherTariffs();
+  list.forEach(function(x,i){
+    var tr=document.createElement("tr");
+    tr.appendChild(settingCell("teacherTariffs",i,"name",x.name,"text",260));
+    tr.appendChild(settingCell("teacherTariffs",i,"price",x.price,"number",110));
+    var td=document.createElement("td");
+    var rm=el('<button class="btn sm" type="button">Удалить</button>');
+    rm.onclick=function(){var l=teacherTariffs().slice();l.splice(i,1);saveSettingList("teacherTariffs",l);};
+    td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
-  box.appendChild(f);
-  box.appendChild(el('<h3 class="refh">Личные ставки педагогов</h3>'));
-  box.appendChild(el('<p class="sub" style="margin:0">Пусто — действует базовая ставка по формату занятия.</p>'));
-  var f2=el('<div class="ref" style="padding:0;gap:8px"></div>');
-  teacherList().forEach(function(t){
-    var rr=t.rates||{};
-    var cur=FMT.map(function(x){
-      return typeof rr[x[0]]==="number"?x[1]+" "+fmtMoney(rr[x[0]]):"";}).filter(Boolean).join(" · ");
-    f2.appendChild(acc("rt:"+t.id,esc(t.name),esc(cur||"по базовым ставкам"),function(){
-      var ff=el('<div class="fields"></div>');
-      FMT.forEach(function(x){
-        var lab=el('<label class="f">'+esc(x[1])+", ₽</label>");
-        var inp=document.createElement("input");inp.type="number";inp.min="0";inp.step="50";
-        inp.id="tr-"+t.id+"-"+x[0];
-        inp.value=typeof rr[x[0]]==="number"?rr[x[0]]:"";
-        inp.placeholder=String(b[x[0]]||0);
-        inp.onchange=function(){
-          var nr=Object.assign({},t.rates||{});
-          if(inp.value==="")delete nr[x[0]];else nr[x[0]]=+inp.value||0;
-          saveTeacher(t.id,{rates:nr});
-        };
-        lab.appendChild(inp);ff.appendChild(lab);
-      });
-      return ff;
-    }));
-  });
-  box.appendChild(f2);
-  c.appendChild(box);
+  if(!list.length)tb.appendChild(el('<tr><td colspan="3" class="sub">Пока ни одного тарифа.</td></tr>'));
+  var trAdd=el('<tr><td colspan="3"></td></tr>');
+  var add=el('<button class="btn sm" type="button">Добавить тариф</button>');
+  add.onclick=function(){saveSettingList("teacherTariffs",teacherTariffs().concat([{name:"Новый тариф",price:1000}]));};
+  trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
+  c.querySelector(".tscroll").appendChild(tbl);
   return c;
+}
+function rateOptions(){
+  return[["","— без тарифа —"]].concat(teacherTariffs().map(function(x){
+    return[x.name,x.name+" · "+fmtMoney(x.price)];}));
 }
 function refPackages(){
   var c=el('<div class="card"><div class="chead"><h2>Абонементы</h2>'+
@@ -893,10 +876,14 @@ function unitRow(u){
       var t=state.teachers[g.teacherId]||{};
       f.appendChild(readField("Группа",g.name));
       f.appendChild(readField("Педагог",t.name||"не выбран"));
+      f.appendChild(readField("Ставка педагога",(g.rateName||"не выбрана")+
+        (g.rateName?" · "+fmtMoney(teacherRate(g.rateName)):"")));
     }else{
       f.appendChild(readField("Группа","не состоит"));
       f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
         [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
+      f.appendChild(field("Ставка педагога","u-rn-"+u.id,u.rateName||"",null,
+        function(v){saveUnit(u.id,{rateName:v});},rateOptions()));
     }
     f.appendChild(field("Абонемент","u-pkg-"+u.id,u.pkg||"",null,function(v){saveUnit(u.id,{pkg:v});},
       [["","— без абонемента —"]].concat(packages().map(function(x){
@@ -918,11 +905,8 @@ function unitRow(u){
   /* группа */
   f.appendChild(field("Педагог","u-t-"+u.id,u.teacherId,null,function(v){saveUnit(u.id,{teacherId:v});},
     [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
-  var br=baseRates(),tt=state.teachers[u.teacherId]||{},tr=tt.rates||{};
-  f.appendChild(field("Ставка педагога","u-f-"+u.id,u.format,null,function(v){saveUnit(u.id,{format:v});},
-    [["individual","Индивидуально"],["mini","Мини-группа"],["group","Группа"]].map(function(x){
-      var r=typeof tr[x[0]]==="number"?tr[x[0]]:(br[x[0]]||0);
-      return[x[0],x[1]+" · "+fmtMoney(r)];})));
+  f.appendChild(field("Ставка педагога","u-rn-"+u.id,u.rateName||"",null,
+    function(v){saveUnit(u.id,{rateName:v});},rateOptions()));
   row.appendChild(f);
   var wdlab2=el('<label class="f">Дни недели</label>');
   wdlab2.appendChild(wdPicker(u));
@@ -975,7 +959,7 @@ function addUnit(kind){
   if(!needWrite())return;
   var id=newId(kind==="group"?"g":"u");
   var body={kind:kind,name:kind==="group"?"Новая группа":"Новый ученик",parent:"",
-    teacherId:"",format:kind==="group"?"group":"individual",
+    teacherId:"",format:kind==="group"?"group":"individual",rateName:"",
     price:0,weekdays:[],note:"",active:true,
     order:900+Object.keys(state.units).length,channel:"",
     members:[],memberIds:[],groupId:"",pkg:""};
@@ -1036,6 +1020,7 @@ function unitFromRow(r){
   return{id:r.id,kind:r.kind||"solo",name:r.name||"",parent:r.parent||"",teacherId:r.teacher_id||"",
     format:r.format||"individual",price:num(r.price),
     pkg:r.package_name||"",groupId:r.group_id||"",memberIds:r.member_ids||[],
+    rateName:r.rate_name||"",
     weekdays:(r.weekdays||[]).map(Number),members:r.members||[],channel:r.channel||"",
     note:r.note||"",active:r.active!==false,order:r.order_no};
 }
@@ -1043,6 +1028,7 @@ function unitToRow(u){
   return{id:u.id,kind:u.kind||"solo",name:u.name||"",parent:u.parent||"",teacher_id:u.teacherId||"",
     format:u.format||"individual",price:num(u.price),rate:null,
     package_name:u.pkg||"",group_id:u.groupId||"",member_ids:u.memberIds||[],
+    rate_name:u.rateName||"",
     weekdays:(u.weekdays||[]).map(Number),members:u.members||[],channel:u.channel||"",
     note:u.note||"",active:u.active!==false,order_no:u.order==null?900:u.order};
 }
@@ -1067,7 +1053,8 @@ var API={
       oops(r[1]).forEach(function(row){units[row.id]=unitFromRow(row);});
       var s=r[2].error?null:r[2].data;
       return{teachers:teachers,units:units,
-        settings:s?{baseRates:s.base_rates||{},tariffs:s.tariffs||[],packages:s.packages||[]}:{}};
+        settings:s?{tariffs:s.tariffs||[],packages:s.packages||[],
+          teacherTariffs:s.teacher_tariffs||[]}:{}};
     });
   },
   loadMonth:function(ym){
@@ -1099,8 +1086,9 @@ var API={
     return sb.from("oe_teachers").upsert(row,{onConflict:"owner,id"}).then(oops);
   },
   saveSettings:function(s){
-    return sb.from("oe_settings").upsert({owner:session.user.id,base_rates:s.baseRates||{},
-      tariffs:s.tariffs||[],packages:s.packages||[]},{onConflict:"owner"}).then(oops);
+    return sb.from("oe_settings").upsert({owner:session.user.id,
+      tariffs:s.tariffs||[],packages:s.packages||[],
+      teacher_tariffs:s.teacherTariffs||[]},{onConflict:"owner"}).then(oops);
   }
 };
 
