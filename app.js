@@ -1213,6 +1213,12 @@ function numCell(id,value,width,step,onchange){
   td.appendChild(i);return td;
 }
 /* Фильтр строк: все, только группы, только индивидуальные или одна группа. */
+/* Для группового ученика — название группы, для индивидуального — педагог. */
+function whereText(u,g){
+  if(g)return g.name;
+  var t=state.teachers[u.teacherId];
+  return t&&t.name?t.name+" · индивидуально":"педагог не выбран";
+}
 function billFilter(){return state.billf||"all";}
 function setBillFilter(v){
   state.billf=v;
@@ -1263,7 +1269,7 @@ function billCard(){
   };
   bar.appendChild(all);c.appendChild(bar);
   var scroll=el('<div class="tscroll"></div>');
-  var tbl=el('<table><thead><tr><th>Ученик</th><th>Группа</th>'+
+  var tbl=el('<table><thead><tr><th>Ученик</th><th>Группа или педагог</th>'+
     '<th class="r">Перешло</th><th class="r">По плану</th><th class="r">Занятий</th>'+
     '<th class="r">Цена</th><th class="r">Скидка, %</th><th class="r">Подарок, ₽</th>'+
     '<th class="r">К оплате</th><th class="r">Оплачено</th><th class="r">Долг</th>'+
@@ -1275,7 +1281,7 @@ function billCard(){
     var r=billRow(u),g=groupOf(u),tr=document.createElement("tr");
     T.plan+=r.plan;
     tr.appendChild(el("<td>"+esc(u.name)+(u.parent?' <span class="sub">'+esc(u.parent)+"</span>":"")+"</td>"));
-    tr.appendChild(el('<td class="sub">'+(g?esc(g.name):"—")+"</td>"));
+    tr.appendChild(el('<td class="sub">'+esc(whereText(u,g))+"</td>"));
     tr.appendChild(numCell("c-in-"+u.id,r.cin,66,"1",function(v){setCarry(u,v);}));
     tr.appendChild(el('<td class="r sub">'+fmtNum(r.plan)+"</td>"));
     if(!r.b){
