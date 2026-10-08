@@ -218,3 +218,5 @@ h1 span{font-size:12.5px}
   font-family:var(--font-ui);font-size:13px;color:var(--ink-2)}
 .calday:hover{border-color:var(--accent)}
 .calday.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.calnav{display:flex;align-items:center;gap:8px;margin:2px 0 6px}
+.calmonth{font-family:var(--font-ui);font-size:13.5px;min-width:130px;text-align:center}

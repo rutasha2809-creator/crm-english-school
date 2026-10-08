@@ -7,7 +7,7 @@ var STATUS_ORDER_PLAN=["none","plan","done","pc","c"];
 var MARK={plan:"",done:"✓",pc:"₽",c:"×"};
 var CLS={plan:"c-plan",done:"c-done",pc:"c-pc",c:"c-c",off:"c-off"};
 
-var state={tab:"month",ref:"teachers",sale:null,rep:{from:null,to:null},ym:null,
+var state={tab:"month",ref:"teachers",sale:null,cal:{},rep:{from:null,to:null},ym:null,
   teachers:{},units:{},months:{},subs:{},payments:{},settings:{},open:{},
   ready:false,err:null};
 
@@ -776,9 +776,14 @@ function settingSelect(listName,idx,field,value,opts){
   };
   td.appendChild(sel);return td;
 }
-/* Календарь месяца: клик по дате ставит или снимает занятие. */
-function datePicker(u){
-  var ym=state.ym,n=daysIn(ym),md=mdoc(u,ym);
+/* Календарь месяца: клик по дате ставит или снимает занятие.
+   Месяц выбирается стрелками в самой карточке, независимо от шапки. */
+function calYm(u){return(state.cal||{})[u.id]||state.ym;}
+function setCalYm(u,ym){
+  state.cal=state.cal||{};state.cal[u.id]=ym;render();
+}
+function datePicker(u,ym){
+  var n=daysIn(ym),md=mdoc(u,ym);
   var box=el('<div class="cal"></div>');
   DOW.forEach(function(name){box.appendChild(el('<span class="calhd">'+name+"</span>"));});
   var shift=dowOf(ym,1)-1;
@@ -787,11 +792,12 @@ function datePicker(u){
     (function(day){
       var st=dayStatus(u,ym,day,md),on=st!=="none";
       var b=el('<button type="button" class="calday'+(on?" on":"")+'">'+day+"</button>");
+      b.id="cd-"+u.id+"-"+day;
       b.setAttribute("aria-pressed",on?"true":"false");
       b.title=day+" "+MONTHS_IN[ymParts(ym).m-1]+", "+DOW[dowOf(ym,day)-1];
       b.onclick=function(){
         var patch={};patch[String(day)]=on?null:"plan";
-        saveMonth(u,{days:patch});
+        saveMonth2(u,ym,patch);
       };
       box.appendChild(b);
     })(d);
@@ -799,15 +805,24 @@ function datePicker(u){
   return box;
 }
 function planField(u){
-  var lab=el('<label class="f">Занятия в '+esc(ymLabel(state.ym))+"</label>");
-  lab.appendChild(datePicker(u));
+  var ym=calYm(u);
+  var lab=el('<label class="f">Занятия по месяцам</label>');
+  var nav=el('<div class="calnav"></div>');
+  var prevM=el('<button class="btn sm" type="button" aria-label="Предыдущий месяц">‹</button>');
+  var nextM=el('<button class="btn sm" type="button" aria-label="Следующий месяц">›</button>');
+  var lbl=el('<b class="calmonth">'+esc(ymLabel(ym))+"</b>");
+  prevM.onclick=function(){setCalYm(u,ymShift(ym,-1));};
+  nextM.onclick=function(){setCalYm(u,ymShift(ym,1));};
+  nav.appendChild(prevM);nav.appendChild(lbl);nav.appendChild(nextM);
+  lab.appendChild(nav);
+  lab.appendChild(datePicker(u,ym));
   var row=el('<div class="btnrow" style="margin-top:6px"></div>');
-  var prev=el('<button class="btn sm" type="button">Повторить прошлый месяц</button>');
-  prev.onclick=function(){
-    var n=copyPlanFrom(u,ymShift(state.ym,-1),state.ym);
-    toast(n?"Добавлено занятий: "+n:"В прошлом месяце занятий не было");
+  var copy=el('<button class="btn sm" type="button">Повторить '+esc(ymLabel(ymShift(ym,-1)))+"</button>");
+  copy.onclick=function(){
+    var n=copyPlanFrom(u,ymShift(ym,-1),ym);
+    toast(n?"Добавлено занятий: "+n:"В "+ymLabel(ymShift(ym,-1))+" занятий не было");
   };
-  row.appendChild(prev);
+  row.appendChild(copy);
   lab.appendChild(row);
   return lab;
 }
