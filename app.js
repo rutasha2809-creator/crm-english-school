@@ -1594,13 +1594,12 @@ function allocPaid(u,ym){
   lus.forEach(function(lu){var c=chargeOf(u,ym,lu);tot+=c;parts.push({id:lu.id,c:c});});
   var p=paidOf(u,ym);
   if(!parts.length)return acc;
-  if(tot<=0){acc[parts[0].id]=p;return acc;}
-  var sum=0,best=0;
-  parts.forEach(function(x,i){
-    acc[x.id]=Math.round(p*x.c/tot);sum+=acc[x.id];
-    if(x.c>parts[best].c)best=i;
+  var left=p;
+  parts.forEach(function(x){
+    var v=Math.min(left,Math.max(0,x.c));
+    acc[x.id]=v;left-=v;
   });
-  acc[parts[best].id]+=p-sum;
+  if(left)acc[parts[parts.length-1].id]+=left;
   return acc;
 }
 function luStudents(lu,ym){
@@ -1610,7 +1609,7 @@ function luStudents(lu,ym){
   }).sort(byName);
 }
 function monthReport(ym){
-  var blocks=[],T={lessons:0,charge:0,paid:0},debts=[],D=0;
+  var blocks=[],T={lessons:0,charge:0,paid:0},debts=[],D=0,over=[],O=0;
   var units=scheduleUnits().slice().sort(function(a,b){
     var ta=(state.teachers[a.kind==="group"?a.teacherId:effTeacherId(a)]||{}).name||"";
     var tb=(state.teachers[b.kind==="group"?b.teacherId:effTeacherId(b)]||{}).name||"";
@@ -1639,17 +1638,18 @@ function monthReport(ym){
   /* кто ещё должен — по ученику за этот месяц */
   students().forEach(function(u){
     var charge=chargeOf(u,ym),paid=paidOf(u,ym),d=charge-paid;
-    if(d<=0)return;
-    D+=d;
+    if(!d)return;
     var lus=lessonUnitsOfStudent(u).filter(function(lu){return !beforeStart(u,lu,ym);});
-    debts.push({u:u,
+    var row={u:u,
       what:lus.map(function(lu){return luLabel(u,lu);}).join(", ")||"—",
       who:lus.map(function(lu){
         var t=state.teachers[lu.kind==="group"?lu.teacherId:effTeacherId(lu)];
         return t?t.name:"";}).filter(function(x,i,a){return x&&a.indexOf(x)===i;}).join(", "),
-      charge:charge,paid:paid,debt:d});
+      charge:charge,paid:paid,debt:d>0?d:0,over:d<0?-d:0};
+    if(d>0){D+=d;debts.push(row);}else{O+=-d;over.push(row);}
   });
   debts.sort(function(a,b){return b.debt-a.debt;});
+  over.sort(function(a,b){return b.over-a.over;});
   /* педагоги за месяц */
   var tea=[],P={held:0,accrued:0,paid:0};
   teacherList().forEach(function(t){
@@ -1664,8 +1664,8 @@ function monthReport(ym){
     P.held+=held;P.accrued+=accrued;P.paid+=paid;
     tea.push({name:t.name,held:held,accrued:accrued,paid:paid,debt:accrued-paid});
   });
-  return{ym:ym,blocks:blocks,total:T,debts:debts,debtTotal:D,teachers:tea,tTotal:P,
-    profit:T.charge-P.accrued};
+  return{ym:ym,blocks:blocks,total:T,debts:debts,debtTotal:D,over:over,overTotal:O,
+    teachers:tea,tTotal:P,profit:T.charge-P.accrued};
 }
 
 /* ---------- выгрузка в Excel ---------- */
@@ -1721,24 +1721,27 @@ function downloadReport(ym){
 
     /* 1. оплаты по занятиям */
     var h=["Ученик","Родитель","Занятий","Цена","Скидка, %","Подарок, ₽",
-      "Начислено","Оплачено","Долг"];
+      "Начислено","Оплачено","Долг","Переплата"];
     var a=[[xc("Оплаты за "+ymLabel(ym),XS.title)],[],h.map(function(x){return xc(x,XS.head);})];
     R.blocks.forEach(function(b){
       a.push([xc(b.label+" · "+b.teacher,XS.grp),xc("",XS.grp),xc(b.sum.lessons,XS.grpNum),
         xc("",XS.grp),xc("",XS.grp),xc("",XS.grp),
         xc(b.sum.charge,XS.grpMoney),xc(b.sum.paid,XS.grpMoney),
-        xc(b.sum.charge-b.sum.paid,XS.grpMoney)]);
+        xc(Math.max(0,b.sum.charge-b.sum.paid),XS.grpMoney),
+        xc(Math.max(0,b.sum.paid-b.sum.charge),XS.grpMoney)]);
       b.rows.forEach(function(r){
         a.push([xc(r.u.name),xc(r.u.parent||""),xc(r.les),xc(r.price,XS.money),
           xc(r.dis||""),xc(r.gift||"",r.gift?XS.money:XS.txt),
           xc(r.charge,XS.money),xc(r.paid,XS.money),
-          xc(r.debt,r.debt>0?XS.debt:XS.money)]);
+          xc(r.debt>0?r.debt:0,r.debt>0?XS.debt:XS.money),
+          xc(r.debt<0?-r.debt:0,XS.money)]);
       });
     });
     a.push([xc("Итого",XS.tot),xc("",XS.tot),xc(R.total.lessons,XS.tot),xc("",XS.tot),
       xc("",XS.tot),xc("",XS.tot),xc(R.total.charge,XS.totMoney),
-      xc(R.total.paid,XS.totMoney),xc(R.total.charge-R.total.paid,XS.totMoney)]);
-    XLSX.utils.book_append_sheet(wb,sheetFrom(a,[22,18,9,11,10,12,13,13,13]),"Оплаты");
+      xc(R.total.paid,XS.totMoney),xc(R.debtTotal,XS.totMoney),
+      xc(R.overTotal,XS.totMoney)]);
+    XLSX.utils.book_append_sheet(wb,sheetFrom(a,[22,18,9,11,10,12,13,13,13,13]),"Оплаты");
 
     /* 2. кто должен */
     var h2=["Ученик","Родитель","Занятия","Педагог","Начислено","Оплачено","Долг"];
@@ -1750,21 +1753,35 @@ function downloadReport(ym){
     });
     d.push([xc("Итого",XS.tot),xc("",XS.tot),xc("",XS.tot),xc("",XS.tot),xc("",XS.tot),
       xc("",XS.tot),xc(R.debtTotal,XS.totMoney)]);
+    if(R.over.length){
+      d.push([]);
+      d.push([xc("Переплаты за "+ymLabel(ym),XS.title)]);
+      d.push(["Ученик","Родитель","Занятия","Педагог","Начислено","Оплачено","Переплата"]
+        .map(function(x){return xc(x,XS.head);}));
+      R.over.forEach(function(x){
+        d.push([xc(x.u.name),xc(x.u.parent||""),xc(x.what),xc(x.who),
+          xc(x.charge,XS.money),xc(x.paid,XS.money),xc(x.over,XS.money)]);
+      });
+      d.push([xc("Итого",XS.tot),xc("",XS.tot),xc("",XS.tot),xc("",XS.tot),xc("",XS.tot),
+        xc("",XS.tot),xc(R.overTotal,XS.totMoney)]);
+    }
     XLSX.utils.book_append_sheet(wb,sheetFrom(d,[22,18,28,24,13,13,13]),"Долги");
 
     /* 3. педагоги */
-    var h3=["Педагог","Проведено занятий","Начислено","Выплачено","Осталось выплатить"];
+    var h3=["Педагог","Проведено занятий","Начислено","Выплачено","Осталось выплатить","Переплачено"];
     var t=[[xc("Педагоги за "+ymLabel(ym),XS.title)],[],
       h3.map(function(x){return xc(x,XS.head);})];
     R.teachers.forEach(function(x){
       t.push([xc(x.name),xc(x.held),xc(x.accrued,XS.money),xc(x.paid,XS.money),
-        xc(x.debt,x.debt>0?XS.debt:XS.money)]);
+        xc(x.debt>0?x.debt:0,x.debt>0?XS.debt:XS.money),xc(x.debt<0?-x.debt:0,XS.money)]);
     });
+    var tdebt=0,tover=0;
+    R.teachers.forEach(function(x){if(x.debt>0)tdebt+=x.debt;else tover+=-x.debt;});
     t.push([xc("Итого",XS.tot),xc(R.tTotal.held,XS.tot),xc(R.tTotal.accrued,XS.totMoney),
-      xc(R.tTotal.paid,XS.totMoney),xc(R.tTotal.accrued-R.tTotal.paid,XS.totMoney)]);
+      xc(R.tTotal.paid,XS.totMoney),xc(tdebt,XS.totMoney),xc(tover,XS.totMoney)]);
     t.push([]);
     t.push([xc("Заработок школы",XS.tot),xc("",XS.tot),xc(R.profit,XS.totMoney)]);
-    XLSX.utils.book_append_sheet(wb,sheetFrom(t,[26,18,14,14,18]),"Педагоги");
+    XLSX.utils.book_append_sheet(wb,sheetFrom(t,[26,18,14,14,18,14]),"Педагоги");
 
     XLSX.writeFile(wb,name+".xlsx");
     toast("Отчёт скачан",true);
@@ -1788,7 +1805,7 @@ function viewReports(){
   head.appendChild(el('<div class="kpis" style="padding:0 14px 14px">'+
     kpi("Начислено родителям",fmtMoney(R.total.charge))+
     kpi("Получено",fmtMoney(R.total.paid))+
-    kpi("Долг родителей",fmtMoney(R.total.charge-R.total.paid))+
+    kpi("Долг родителей",fmtMoney(R.debtTotal))+kpi("Переплата",fmtMoney(R.overTotal))+
     kpi("Начислено педагогам",fmtMoney(R.tTotal.accrued))+
     kpi("Заработок школы",fmtMoney(R.profit))+"</div>"));
   wrap.appendChild(head);
@@ -1801,7 +1818,7 @@ function viewReports(){
   var tbl=el('<table><thead><tr><th>Ученик</th><th>Родитель</th>'+
     '<th class="r">Занятий</th><th class="r">Цена</th><th class="r">Скидка, %</th>'+
     '<th class="r">Подарок, ₽</th><th class="r">Начислено</th><th class="r">Оплачено</th>'+
-    '<th class="r">Долг</th></tr></thead><tbody></tbody></table>');
+    '<th class="r">Долг</th><th class="r">Переплата</th></tr></thead><tbody></tbody></table>');
   var tb=tbl.querySelector("tbody");
   R.blocks.forEach(function(b){
     tb.appendChild(el('<tr class="grp"><td colspan="2"><b>'+esc(b.label)+
@@ -1809,7 +1826,8 @@ function viewReports(){
       '<td class="r"><b>'+fmtNum(b.sum.lessons)+"</b></td><td colspan=\"3\"></td>"+
       '<td class="r"><b>'+esc(fmtMoney(b.sum.charge))+"</b></td>"+
       '<td class="r"><b>'+esc(fmtMoney(b.sum.paid))+"</b></td>"+
-      '<td class="r"><b>'+esc(fmtMoney(b.sum.charge-b.sum.paid))+"</b></td></tr>"));
+      '<td class="r"><b>'+esc(fmtMoney(Math.max(0,b.sum.charge-b.sum.paid)))+"</b></td>"+
+      '<td class="r"><b>'+esc(fmtMoney(Math.max(0,b.sum.paid-b.sum.charge)))+"</b></td></tr>"));
     b.rows.forEach(function(r){
       tb.appendChild(el("<tr><td>"+esc(r.u.name)+'</td><td class="sub">'+esc(r.u.parent||"")+
         '</td><td class="r">'+(r.billed?fmtNum(r.les):'<span class="sub">не начислено</span>')+
@@ -1819,15 +1837,15 @@ function viewReports(){
         '</td><td class="r">'+esc(fmtMoney(r.charge))+
         '</td><td class="r">'+esc(fmtMoney(r.paid))+
         '</td><td class="r nowrap">'+(r.debt>0?'<span class="pill warn">'+esc(fmtMoney(r.debt))+"</span>":
-          r.debt<0?'<span class="pill ok">переплата '+esc(fmtMoney(-r.debt))+"</span>":
-          '<span class="pill ok">оплачено</span>')+"</td></tr>"));
+          '<span class="pill ok">оплачено</span>')+
+        '</td><td class="r">'+(r.debt<0?esc(fmtMoney(-r.debt)):"—")+"</td></tr>"));
     });
   });
-  if(!R.blocks.length)tb.appendChild(el('<tr><td colspan="9" class="sub">В этом месяце занятий нет.</td></tr>'));
+  if(!R.blocks.length)tb.appendChild(el('<tr><td colspan="10" class="sub">В этом месяце занятий нет.</td></tr>'));
   else tb.appendChild(el('<tr class="tot"><td colspan="2">Итого</td><td class="r">'+
     fmtNum(R.total.lessons)+'</td><td colspan="3"></td><td class="r">'+esc(fmtMoney(R.total.charge))+
     '</td><td class="r">'+esc(fmtMoney(R.total.paid))+'</td><td class="r">'+
-    esc(fmtMoney(R.total.charge-R.total.paid))+"</td></tr>"));
+    esc(fmtMoney(R.debtTotal))+'</td><td class="r">'+esc(fmtMoney(R.overTotal))+"</td></tr>"));
   sc.appendChild(tbl);c1.appendChild(sc);wrap.appendChild(c1);
 
   /* кто должен */
@@ -1849,6 +1867,26 @@ function viewReports(){
     esc(fmtMoney(R.debtTotal))+"</td></tr>"));
   sc2.appendChild(t2);c2.appendChild(sc2);wrap.appendChild(c2);
 
+  /* переплаты */
+  if(R.over.length){
+    var c4=el('<div class="card"><div class="chead"><h2>Переплаты</h2>'+
+      '<span class="hint">За '+esc(ymLabel(ym))+": поступило больше, чем начислено</span></div></div>");
+    var sc4=el('<div class="tscroll"></div>');
+    var t4=el('<table><thead><tr><th>Ученик</th><th>Родитель</th><th>Занятия</th>'+
+      '<th>Педагог</th><th class="r">Начислено</th><th class="r">Оплачено</th>'+
+      '<th class="r">Переплата</th></tr></thead><tbody></tbody></table>');
+    var tb4=t4.querySelector("tbody");
+    R.over.forEach(function(x){
+      tb4.appendChild(el("<tr><td>"+esc(x.u.name)+'</td><td class="sub">'+esc(x.u.parent||"")+
+        '</td><td class="sub">'+esc(x.what)+'</td><td class="sub">'+esc(x.who)+
+        '</td><td class="r">'+esc(fmtMoney(x.charge))+'</td><td class="r">'+esc(fmtMoney(x.paid))+
+        '</td><td class="r"><span class="pill ok">'+esc(fmtMoney(x.over))+"</span></td></tr>"));
+    });
+    tb4.appendChild(el('<tr class="tot"><td colspan="6">Итого</td><td class="r">'+
+      esc(fmtMoney(R.overTotal))+"</td></tr>"));
+    sc4.appendChild(t4);c4.appendChild(sc4);wrap.appendChild(c4);
+  }
+
   /* педагоги */
   var c3=el('<div class="card"><div class="chead"><h2>Педагоги</h2>'+
     '<span class="hint">Начислено за проведённые занятия по ставке педагога</span></div></div>');
@@ -1861,13 +1899,16 @@ function viewReports(){
     tb3.appendChild(el("<tr><td>"+esc(x.name)+'</td><td class="r">'+fmtNum(x.held)+
       '</td><td class="r">'+esc(fmtMoney(x.accrued))+'</td><td class="r">'+esc(fmtMoney(x.paid))+
       '</td><td class="r nowrap">'+(x.debt>0?'<span class="pill warn">'+esc(fmtMoney(x.debt))+"</span>":
-        '<span class="pill ok">выплачено</span>')+"</td></tr>"));
+        '<span class="pill ok">выплачено</span>')+
+      '</td><td class="r">'+(x.debt<0?esc(fmtMoney(-x.debt)):"—")+"</td></tr>"));
   });
-  if(!R.teachers.length)tb3.appendChild(el('<tr><td colspan="5" class="sub">Проведённых занятий в этом месяце нет.</td></tr>'));
+  var tdebt=0,tover=0;
+  R.teachers.forEach(function(x){if(x.debt>0)tdebt+=x.debt;else tover+=-x.debt;});
+  if(!R.teachers.length)tb3.appendChild(el('<tr><td colspan="6" class="sub">Проведённых занятий в этом месяце нет.</td></tr>'));
   else tb3.appendChild(el('<tr class="tot"><td>Итого</td><td class="r">'+fmtNum(R.tTotal.held)+
     '</td><td class="r">'+esc(fmtMoney(R.tTotal.accrued))+'</td><td class="r">'+
-    esc(fmtMoney(R.tTotal.paid))+'</td><td class="r">'+
-    esc(fmtMoney(R.tTotal.accrued-R.tTotal.paid))+"</td></tr>"));
+    esc(fmtMoney(R.tTotal.paid))+'</td><td class="r">'+esc(fmtMoney(tdebt))+
+    '</td><td class="r">'+esc(fmtMoney(tover))+"</td></tr>"));
   sc3.appendChild(t3);c3.appendChild(sc3);wrap.appendChild(c3);
   return wrap;
 }
