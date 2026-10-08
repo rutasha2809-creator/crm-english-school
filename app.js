@@ -69,19 +69,11 @@ function studentsOfTeacher(tid){
   return students().filter(function(u){return effTeacherId(u)===tid;});
 }
 function tariffs(){return state.settings.tariffs||[];}
-function packages(){return state.settings.packages||[];}
 function teacherTariffs(){return state.settings.teacherTariffs||[];}
+/* Цена одного занятия для ученика по тарифу клиента. */
 function tariffPrice(name){
   var t=tariffs().filter(function(x){return x.name===name;})[0];
   return t?(+t.price||0):0;
-}
-function packageOf(name){
-  var p=packages().filter(function(x){return x.name===name;})[0];
-  return p||null;
-}
-function packageTotal(x){
-  var price=tariffPrice(x.tariff),gross=(+x.lessons||0)*price;
-  return Math.round(gross-gross*(+x.discount||0)/100);
 }
 function teacherRate(name){
   var t=teacherTariffs().filter(function(x){return x.name===name;})[0];
@@ -144,7 +136,25 @@ function heldOf(u,ym){
   return total;
 }
 
-/* ---------- документы: продажи и деньги ---------- */
+/* ---------- начисления и оплаты ---------- */
+/* Тариф клиента: ученик в группе берёт его от группы, как и ставку педагога. */
+function tariffNameOf(u){
+  var g=groupOf(u);
+  return(g?g.tariffName:u.tariffName)||"";
+}
+function priceOf(u){return tariffPrice(tariffNameOf(u));}
+/* Начисление ученику за месяц — одна строка на «ученик + месяц». */
+function billId(u,ym){return "bill-"+ym+"-"+u.id;}
+function billOf(u,ym){return state.subs[billId(u,ym)]||null;}
+function billTotal(b){
+  var gross=(+b.lessons||0)*(+b.price||0);
+  return Math.max(0,Math.round(gross-gross*(+b.discount||0)/100)-(+b.gift||0));
+}
+/* Фактическая оплата родителя за месяц — одна строка на «ученик + месяц». */
+function payId(u,ym){return "in-"+ym+"-"+u.id;}
+function paidOf(u,ym){var p=state.payments[payId(u,ym)];return p?+p.amount||0:0;}
+
+/* ---------- документы ---------- */
 function subsList(){
   var a=[];for(var k in state.subs){a.push(state.subs[k]);}
   a.sort(function(x,y){return String(y.soldOn).localeCompare(String(x.soldOn));});
@@ -263,9 +273,10 @@ function deletePayment(id){
 function renameRefs(kind,oldName,newName){
   if(!oldName||oldName===newName)return;
   if(kind==="tariffs"){
-    var ps=packages().map(function(x){
-      return x.tariff===oldName?Object.assign({},x,{tariff:newName}):x;});
-    if(JSON.stringify(ps)!==JSON.stringify(packages()))saveSettingList("packages",ps);
+    for(var j in state.units){
+      var u2=state.units[j];
+      if(u2.tariffName===oldName)saveUnit(u2.id,{tariffName:newName});
+    }
   }
   if(kind==="teacherTariffs"){
     for(var k in state.units){
@@ -521,8 +532,7 @@ var REF_BLOCKS=[
   {id:"groups",label:"Группы"},
   {id:"solos",label:"Индивидуальные занятия"},
   {id:"tariffs",label:"Тарифы клиентам"},
-  {id:"rates",label:"Тарифы педагогов"},
-  {id:"packages",label:"Абонементы"}
+  {id:"rates",label:"Тарифы педагогов"}
 ];
 function openMap(){return state.open||(state.open={});}
 function isOpen(id){return !!openMap()[id];}
@@ -564,7 +574,7 @@ function viewRef(){
   });
   wrap.appendChild(nav);
   var fn={teachers:refTeachers,students:refStudents,groups:refGroups,solos:refSolos,
-          tariffs:refTariffs,rates:refRates,packages:refPackages}[state.ref||"teachers"];
+          tariffs:refTariffs,rates:refRates}[state.ref||"teachers"];
   wrap.appendChild((fn||refTeachers)());
   return wrap;
 }
@@ -604,6 +614,7 @@ function refGroups(){
     var t=state.teachers[g.teacherId]||{};
     var meta=[t.name||"учитель не выбран",
       rateExists(g.rateName)?(g.rateName||"ставка не выбрана"):"ставки нет в справочнике",
+      g.tariffName||"тариф не выбран",
       groupMembers(g).length+" чел.",wdText(g)].join(" · ");
     h.appendChild(acc("g:"+g.id,esc(g.name),esc(meta),function(){return unitRow(g);}));
   });
@@ -620,7 +631,7 @@ function refSolos(){
     var t=state.teachers[u.teacherId]||{};
     var meta=[t.name||"педагог не выбран",
       rateExists(u.rateName)?(u.rateName||"ставка не выбрана"):"ставки нет в справочнике",
-      wdText(u)].join(" · ");
+      u.tariffName||"тариф не выбран",wdText(u)].join(" · ");
     h.appendChild(acc("il:"+u.id,esc(u.name),esc(meta),function(){return soloLessonRow(u);}));
   });
   if(!list.length)h.appendChild(el('<p class="sub" style="margin:0">Все ученики занимаются в группах.</p>'));
@@ -634,6 +645,8 @@ function soloLessonRow(u){
     [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
   f.appendChild(field("Ставка педагога","il-rn-"+u.id,u.rateName||"",null,
     function(v){saveUnit(u.id,{rateName:v});},rateOptions(u.rateName)));
+  f.appendChild(field("Тариф ученика","il-tn-"+u.id,u.tariffName||"",null,
+    function(v){saveUnit(u.id,{tariffName:v});},tariffOptions(u.tariffName)));
   f.appendChild(readField("Родитель",u.parent||"не указан"));
   row.appendChild(f);
   var wdlab=el('<label class="f">Дни недели</label>');
@@ -688,44 +701,19 @@ function refRates(){
   c.querySelector(".tscroll").appendChild(tbl);
   return c;
 }
+function tariffOptions(current){
+  var opts=[["","— без тарифа —"]].concat(tariffs().map(function(x){
+    return[x.name,x.name+" · "+fmtMoney(x.price)];}));
+  if(current&&!tariffs().some(function(x){return x.name===current;}))
+    opts.push([current,current+" — тарифа нет в справочнике"]);
+  return opts;
+}
 function rateOptions(current){
   var opts=[["","— без тарифа —"]].concat(teacherTariffs().map(function(x){
     return[x.name,x.name+" · "+fmtMoney(x.price)];}));
   /* если назначенный тариф удалён из справочника, не теряем его молча */
   if(current&&!rateExists(current))opts.push([current,current+" — тарифа нет в справочнике"]);
   return opts;
-}
-function refPackages(){
-  var c=el('<div class="card"><div class="chead"><h2>Абонементы</h2>'+
-    '<span class="hint">Заготовки для продажи: стоимость = количество занятий × цена занятия минус скидка</span>'+
-    '</div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr>'+
-    '<th>Название</th><th>Тариф ученика</th><th class="r">Количество занятий</th>'+
-    '<th class="r">Цена занятия</th><th class="r">Скидка, %</th>'+
-    '<th class="r">Стоимость абонемента</th><th></th>'+
-    "</tr></thead><tbody></tbody></table>");
-  var tb=tbl.querySelector("tbody"),list=packages();
-  list.forEach(function(x,i){
-    var tr=document.createElement("tr");
-    tr.appendChild(settingCell("packages",i,"name",x.name,"text",210));
-    tr.appendChild(settingSelect("packages",i,"tariff",x.tariff,
-      [["","— выбрать —"]].concat(tariffs().map(function(t){return[t.name,t.name];}))));
-    tr.appendChild(settingCell("packages",i,"lessons",x.lessons,"number",80));
-    tr.appendChild(el('<td class="r sub">'+(x.tariff?esc(fmtMoney(tariffPrice(x.tariff))):"—")+"</td>"));
-    tr.appendChild(settingCell("packages",i,"discount",x.discount,"number",72));
-    tr.appendChild(el('<td class="r"><b>'+esc(fmtMoney(packageTotal(x)))+"</b></td>"));
-    var td=document.createElement("td");
-    var rm=el('<button class="btn sm" type="button">Удалить</button>');
-    rm.onclick=function(){var l=packages().slice();l.splice(i,1);saveSettingList("packages",l);};
-    td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
-  });
-  if(!list.length)tb.appendChild(el('<tr><td colspan="7" class="sub">Пока ни одного абонемента.</td></tr>'));
-  var trAdd=el('<tr><td colspan="7"></td></tr>');
-  var add=el('<button class="btn sm" type="button">Добавить абонемент</button>');
-  add.onclick=function(){saveSettingList("packages",packages().concat([{name:"",tariff:"",lessons:0,discount:0}]));};
-  trAdd.firstChild.appendChild(add);tb.appendChild(trAdd);
-  c.querySelector(".tscroll").appendChild(tbl);
-  return c;
 }
 function settingCell(listName,idx,field,value,type,width){
   var td=document.createElement("td");
@@ -837,12 +825,16 @@ function unitRow(u){
       f.appendChild(readField("Педагог",t.name||"не выбран"));
       f.appendChild(readField("Ставка педагога",(g.rateName||"не выбрана")+
         (g.rateName?" · "+fmtMoney(teacherRate(g.rateName)):"")));
+      f.appendChild(readField("Тариф ученика",(g.tariffName||"не выбран")+
+        (g.tariffName?" · "+fmtMoney(tariffPrice(g.tariffName)):"")));
     }else{
       var ti=state.teachers[u.teacherId]||{};
       f.appendChild(readField("Группа","занимается индивидуально"));
       f.appendChild(readField("Педагог",ti.name||"не выбран"));
       f.appendChild(readField("Ставка педагога",(u.rateName||"не выбрана")+
         (u.rateName?" · "+fmtMoney(teacherRate(u.rateName)):"")));
+      f.appendChild(readField("Тариф ученика",(u.tariffName||"не выбран")+
+        (u.tariffName?" · "+fmtMoney(tariffPrice(u.tariffName)):"")));
     }
     row.appendChild(f);
     row.appendChild(readField("Дни недели",wdText(u)));
@@ -863,6 +855,8 @@ function unitRow(u){
     [["","— выбрать педагога —"]].concat(teacherList().map(function(x){return[x.id,x.name];}))));
   f.appendChild(field("Ставка педагога","u-rn-"+u.id,u.rateName||"",null,
     function(v){saveUnit(u.id,{rateName:v});},rateOptions(u.rateName)));
+  f.appendChild(field("Тариф ученика","u-tn-"+u.id,u.tariffName||"",null,
+    function(v){saveUnit(u.id,{tariffName:v});},tariffOptions(u.tariffName)));
   row.appendChild(f);
   var wdlab2=el('<label class="f">Дни недели</label>');
   wdlab2.appendChild(wdPicker(u));
@@ -915,7 +909,7 @@ function addUnit(kind){
   if(!needWrite())return;
   var id=newId(kind==="group"?"g":"u");
   var body={kind:kind,name:kind==="group"?"Новая группа":"Новый ученик",parent:"",
-    teacherId:"",rateName:"",weekdays:[],active:true,
+    teacherId:"",rateName:"",tariffName:"",weekdays:[],active:true,
     order:900+Object.keys(state.units).length,channel:"",
     memberIds:[],groupId:""};
   state.units[id]=Object.assign({id:id},body);
@@ -986,30 +980,25 @@ function studentOptions(empty){
     return[u.id,u.name+(g?" · "+g.name:"")+(u.parent?" — "+u.parent:"")];
   }));
 }
-function packageOptions(){
-  return[["","— выбрать абонемент —"]].concat(packages().filter(function(p){return p.name;})
-    .map(function(p){
-      return[p.name,p.name+" · "+(+p.lessons||0)+" зан. · "+fmtMoney(packageTotal(p))];
-    }));
-}
-
-/* ---------- счёт на следующий месяц ---------- */
-/* Родители платят за месяц вперёд: занятий по плану минус то, что осталось
-   неиспользованным, — столько занятий и нужно продать. */
-function billYm(){return ymShift(state.ym,1);}
+/* ---------- начисление за месяц ---------- */
+/* Одна строка на ученика: занятия по плану минус остаток, цена занятия из его
+   тарифа, скидка и подарок, сумма и фактическая оплата. */
+function billYm(){return state.ym;}
 function billRow(u){
   var ym=billYm(),plan=planDays(lessonUnit(u),ym).length;
-  var left=lessonsLeft(u),toSell=Math.max(0,plan-Math.max(0,left));
-  return{u:u,plan:plan,left:left,toSell:toSell};
+  var b=billOf(u,ym),left=lessonsLeft(u);
+  var leftBefore=left+(b?+b.lessons||0:0);
+  var toBill=Math.max(0,plan-Math.max(0,leftBefore));
+  return{u:u,plan:plan,left:left,leftBefore:leftBefore,toBill:toBill,b:b,
+    paid:paidOf(u,ym)};
 }
-/* Остаток можно поправить прямо в таблице: разница сохраняется отдельной
-   строкой-корректировкой, чтобы не выдумывать историю прошлых месяцев. */
+/* Остаток правится прямо в таблице: разница живёт отдельной строкой-поправкой. */
 function adjId(u){return "adj-"+u.id;}
 function setLeft(u,value){
   var cur=lessonsLeft(u),old=state.subs[adjId(u)],had=old?+old.lessons||0:0;
-  var next=had+(value-cur);
-  saveSub({id:adjId(u),studentId:u.id,soldOn:ymShift(state.ym,-1)+"-28",
-    pkg:"Перенос с прошлого периода",lessons:next,price:0,discount:0,total:0,note:"carry"});
+  saveSub({id:adjId(u),studentId:u.id,ym:"",soldOn:ymShift(state.ym,-1)+"-28",
+    pkg:"Перенос с прошлого периода",lessons:had+(value-cur),price:0,discount:0,
+    gift:0,total:0,note:"carry"});
 }
 function leftCell(u){
   var td=document.createElement("td");td.className="r";
@@ -1019,149 +1008,98 @@ function leftCell(u){
   i.onchange=function(){setLeft(u,+i.value||0);};
   td.appendChild(i);return td;
 }
+function makeBill(u,lessons){
+  var ym=billYm();
+  saveSub({id:billId(u,ym),studentId:u.id,ym:ym,soldOn:ym+"-01",pkg:tariffNameOf(u),
+    lessons:lessons,price:priceOf(u),discount:0,gift:0,
+    total:Math.round(lessons*priceOf(u)),note:""});
+}
+function patchBill(u,patch){
+  var ym=billYm(),cur=billOf(u,ym);if(!cur)return;
+  var next=Object.assign({},cur,patch);
+  next.total=billTotal(next);
+  saveSub(next);
+}
+function setPaid(u,amount){
+  var ym=billYm();
+  savePayment({id:payId(u,ym),paidOn:ym+"-01",direction:"in",studentId:u.id,
+    teacherId:"",amount:amount,note:""});
+}
+function numCell(id,value,width,step,onchange,suffix){
+  var td=document.createElement("td");td.className="r";
+  var i=document.createElement("input");
+  i.type="number";i.step=step||"1";i.className="amt";i.style.width=width+"px";
+  i.id=id;i.value=value===0?"0":value;
+  i.onchange=function(){onchange(+i.value||0);};
+  td.appendChild(i);
+  if(suffix)td.appendChild(document.createTextNode(" "+suffix));
+  return td;
+}
 function billCard(){
   var ym=billYm();
-  var c=el('<div class="card"><div class="chead"><h2>Начисление на '+esc(ymLabel(ym))+'</h2>'+
-    '<span class="hint">Остаток можно исправить прямо в таблице — например, вписать занятия, перенесённые с прошлого месяца</span>'+
-    '</div><div class="tscroll"></div></div>');
-  var tbl=el('<table><thead><tr><th>Ученик</th><th>Группа</th>'+
-    '<th class="r">По плану</th><th class="r">Остаток</th><th class="r">К оплате занятий</th><th></th>'+
-    "</tr></thead><tbody></tbody></table>");
-  var tb=tbl.querySelector("tbody"),rows=[],T={plan:0,sell:0};
-  students().forEach(function(u){
-    var r=billRow(u);
-    rows.push(r);T.plan+=r.plan;T.sell+=r.toSell;
-  });
-  rows.forEach(function(r){
-    var g=groupOf(r.u);
-    var tr=el("<tr><td>"+esc(r.u.name)+'</td><td class="sub">'+(g?esc(g.name):"—")+
-      '</td><td class="r">'+fmtNum(r.plan)+"</td></tr>");
-    tr.appendChild(leftCell(r.u));
-    tr.appendChild(el('<td class="r"><b>'+fmtNum(r.toSell)+"</b></td>"));
-    var td=document.createElement("td");
-    var b=el('<button class="btn sm" type="button">Начислить</button>');
-    b.onclick=function(){
-      state.sale={studentId:r.u.id,lessons:r.toSell};
-      state.open=state.open||{};state.open["sale:new"]=1;
-      try{localStorage.setItem("oe.open",JSON.stringify(state.open));}catch(e){}
-      render();
-    };
-    if(!r.toSell)b.disabled=true;
-    td.appendChild(b);tr.appendChild(td);tb.appendChild(tr);
-  });
-  if(!rows.length)tb.appendChild(el('<tr><td colspan="6" class="sub">Не задано ни одного дня занятий, поэтому план на '+
-    esc(ymLabel(ym))+" пустой.</td></tr>"));
-  else tb.appendChild(el('<tr class="tot"><td colspan="2">Итого</td><td class="r">'+fmtNum(T.plan)+
-    '</td><td></td><td class="r">'+fmtNum(T.sell)+"</td><td></td></tr>"));
-  c.querySelector(".tscroll").appendChild(tbl);
-  return c;
-}
-
-/* ---------- продажа абонемента ---------- */
-function saleForm(){
-  var draft=state.sale||{};
-  var box=el('<div class="refrow"></div>');
-  var f=el('<div class="fields"></div>');
-  var whoSel=sel("sale-who",[["one","Одному ученику"],["group","Всей группе"]],"one");
-  var stu=sel("sale-student",studentOptions(),draft.studentId||"");
-  var grp=sel("sale-group",[["","— выбрать группу —"]].concat(groups().map(function(g){
-    return[g.id,g.name+" · "+groupMembers(g).length+" чел."];})),"");
-  var pkg=sel("sale-pkg",packageOptions(),"");
-  var date=inp("sale-date","date",today());
-  var lessons=inp("sale-lessons","number",draft.lessons||"",80);
-  var total=inp("sale-total","number","",110,"50");
-
-  var whoLab=labeled("Кому",whoSel);
-  var stuLab=labeled("Ученик",stu);
-  var grpLab=labeled("Группа",grp);
-  function syncWho(){
-    stuLab.hidden=whoSel.value!=="one";
-    grpLab.hidden=whoSel.value!=="group";
-  }
-  whoSel.onchange=syncWho;
-  /* стоимость всегда считается от количества занятий и цены выбранного абонемента */
-  function recalc(){
-    var p=packageOf(pkg.value);
-    if(!p)return;
-    var price=tariffPrice(p.tariff),n=+lessons.value||0,gross=n*price;
-    total.value=Math.round(gross-gross*(+p.discount||0)/100);
-  }
-  pkg.onchange=function(){
-    var p=packageOf(pkg.value);
-    if(!p)return;
-    if(!(+lessons.value))lessons.value=+p.lessons||0;
-    recalc();
-  };
-  lessons.onchange=recalc;
-  f.appendChild(whoLab);f.appendChild(stuLab);f.appendChild(grpLab);
-  f.appendChild(labeled("Абонемент",pkg));
-  f.appendChild(labeled("Дата продажи",date));
-  f.appendChild(labeled("Занятий",lessons));
-  f.appendChild(labeled("Стоимость",total));
-  box.appendChild(f);
-  syncWho();
-  if(draft.studentId){
-    var du=state.units[draft.studentId]||{};
-    box.appendChild(el('<p class="sub" style="margin:0">Подставлено из счёта на '+
-      esc(ymLabel(billYm()))+": "+esc(du.name||"")+", "+fmtNum(draft.lessons)+
-      " зан. Выберите абонемент — сумма пересчитается по этому количеству.</p>"));
-  }
-
-  var row=el('<div class="btnrow" style="margin-top:4px"></div>');
-  var btn=el('<button class="btn pri" type="button">Начислить</button>');
-  btn.onclick=function(){
-    var targets=[];
-    if(whoSel.value==="group"){
-      var g=state.units[grp.value];
-      if(!g){toast("Выберите группу");return;}
-      targets=groupMembers(g);
-      if(!targets.length){toast("В группе никого нет");return;}
-    }else{
-      var u=state.units[stu.value];
-      if(!u){toast("Выберите ученика");return;}
-      targets=[u];
-    }
-    if(!pkg.value){toast("Выберите абонемент");return;}
-    var n=+lessons.value||0,sum=+total.value||0;
-    if(!n){toast("Укажите количество занятий");return;}
-    var p=packageOf(pkg.value)||{};
-    state.sale=null;
-    targets.forEach(function(u2){
-      saveSub({id:newId("s"),studentId:u2.id,soldOn:date.value||today(),
-        pkg:pkg.value,lessons:n,price:tariffPrice(p.tariff),
-        discount:+p.discount||0,total:sum,note:""});
+  var c=el('<div class="card"><div class="chead"><h2>Начисления за '+esc(ymLabel(ym))+'</h2>'+
+    '<span class="hint">Занятий по плану минус остаток, цена из тарифа ученика; скидка в процентах, подарок в рублях</span>'+
+    '</div></div>');
+  var bar=el('<div class="btnrow" style="padding:10px 14px 0"></div>');
+  var all=el('<button class="btn pri" type="button">Начислить всем по плану</button>');
+  all.onclick=function(){
+    var n=0;
+    students().forEach(function(u){
+      var r=billRow(u);
+      if(r.b||!r.toBill)return;
+      makeBill(u,r.toBill);n++;
     });
-    toast(targets.length>1?"Начислено ученикам: "+targets.length:"Начислено");
+    toast(n?"Начислено ученикам: "+n:"Всем уже начислено");
   };
-  row.appendChild(btn);box.appendChild(row);
-  return box;
-}
-function salesCard(){
-  var c=el('<div class="card"><div class="chead"><h2>Начисления</h2>'+
-    '<span class="hint">Количество занятий и сумма фиксируются в момент начисления и дальше не меняются</span>'+
-    "</div></div>");
-  var h=el('<div class="ref"></div>');
-  h.appendChild(acc("sale:new",'<b>Начислить вручную</b>',"",saleForm));
-  c.appendChild(h);
+  bar.appendChild(all);c.appendChild(bar);
   var scroll=el('<div class="tscroll"></div>');
-  var tbl=el('<table><thead><tr><th>Дата</th><th>Ученик</th><th>Тариф</th>'+
-    '<th class="r">Занятий</th><th class="r">Стоимость</th><th></th>'+
+  var tbl=el('<table><thead><tr><th>Ученик</th><th>Группа</th>'+
+    '<th class="r">По плану</th><th class="r">Остаток</th><th class="r">Занятий</th>'+
+    '<th class="r">Цена</th><th class="r">Скидка, %</th><th class="r">Подарок, ₽</th>'+
+    '<th class="r">К оплате</th><th class="r">Оплачено</th><th class="r">Долг</th><th></th>'+
     "</tr></thead><tbody></tbody></table>");
-  var tb=tbl.querySelector("tbody"),list=subsList(),sum=0,cnt=0;
-  list.forEach(function(s){
-    var u=state.units[s.studentId]||{};
-    sum+=+s.total||0;cnt+=+s.lessons||0;
-    var tr=el("<tr><td>"+esc(fmtDate(s.soldOn))+"</td><td>"+esc(u.name||"ученик удалён")+
-      '</td><td class="sub">'+esc(s.pkg||"—")+'</td><td class="r">'+fmtNum(s.lessons)+
-      '</td><td class="r">'+esc(fmtMoney(s.total))+"</td></tr>");
+  var tb=tbl.querySelector("tbody"),T={plan:0,charge:0,paid:0};
+  students().forEach(function(u){
+    var r=billRow(u),g=groupOf(u),tr=document.createElement("tr");
+    T.plan+=r.plan;
+    tr.appendChild(el("<td>"+esc(u.name)+"</td>"));
+    tr.appendChild(el('<td class="sub">'+(g?esc(g.name):"—")+"</td>"));
+    tr.appendChild(el('<td class="r sub">'+fmtNum(r.plan)+"</td>"));
+    tr.appendChild(leftCell(u));
+    if(!r.b){
+      tr.appendChild(el('<td class="r"><b>'+fmtNum(r.toBill)+"</b></td>"));
+      tr.appendChild(el('<td colspan="5" class="sub">'+
+        (priceOf(u)?"начисление ещё не сделано":"не выбран тариф ученика")+"</td>"));
+      tr.appendChild(el('<td class="r sub">—</td>'));
+      var td0=document.createElement("td");
+      var mk=el('<button class="btn sm" type="button">Начислить</button>');
+      mk.onclick=function(){makeBill(u,r.toBill);};
+      if(!r.toBill||!priceOf(u))mk.disabled=true;
+      td0.appendChild(mk);tr.appendChild(td0);
+      tb.appendChild(tr);return;
+    }
+    var b=r.b,charge=billTotal(b),debt=charge-r.paid;
+    T.charge+=charge;T.paid+=r.paid;
+    tr.appendChild(numCell("b-les-"+u.id,b.lessons,66,"1",function(v){patchBill(u,{lessons:v});}));
+    tr.appendChild(numCell("b-pr-"+u.id,b.price,86,"50",function(v){patchBill(u,{price:v});}));
+    tr.appendChild(numCell("b-dis-"+u.id,b.discount||0,66,"1",function(v){patchBill(u,{discount:v});}));
+    tr.appendChild(numCell("b-gift-"+u.id,b.gift||0,86,"100",function(v){patchBill(u,{gift:v});}));
+    tr.appendChild(el('<td class="r"><b>'+esc(fmtMoney(charge))+"</b></td>"));
+    tr.appendChild(numCell("b-paid-"+u.id,r.paid,96,"100",function(v){setPaid(u,v);}));
+    tr.appendChild(el('<td class="r nowrap">'+
+      (debt>0?'<span class="pill warn">'+esc(fmtMoney(debt))+"</span>":
+       debt<0?'<span class="pill ok">переплата '+esc(fmtMoney(-debt))+"</span>":
+       '<span class="pill ok">оплачено</span>')+"</td>"));
     var td=document.createElement("td");
-    var rm=el('<button class="btn sm" type="button">Удалить</button>');
-    rm.onclick=function(){deleteSub(s.id);toast("Запись удалена");};
-    td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
+    var rm=el('<button class="btn sm" type="button">Убрать</button>');
+    rm.onclick=function(){deleteSub(b.id);toast("Начисление убрано");};
+    td.appendChild(rm);tr.appendChild(td);
+    tb.appendChild(tr);
   });
-  if(!list.length)tb.appendChild(el('<tr><td colspan="6" class="sub">Начислений пока нет.</td></tr>'));
-  else tb.appendChild(el('<tr class="tot"><td colspan="3">Итого</td><td class="r">'+fmtNum(cnt)+
-    '</td><td class="r">'+esc(fmtMoney(sum))+"</td><td></td></tr>"));
+  if(!students().length)tb.appendChild(el('<tr><td colspan="12" class="sub">Пока ни одного ученика.</td></tr>'));
+  else tb.appendChild(el('<tr class="tot"><td colspan="2">Итого</td><td class="r">'+fmtNum(T.plan)+
+    '</td><td colspan="5"></td><td class="r">'+esc(fmtMoney(T.charge))+'</td><td class="r">'+
+    esc(fmtMoney(T.paid))+'</td><td class="r">'+esc(fmtMoney(T.charge-T.paid))+"</td><td></td></tr>"));
   scroll.appendChild(tbl);c.appendChild(scroll);
   return c;
 }
@@ -1170,36 +1108,25 @@ function salesCard(){
 function payForm(){
   var box=el('<div class="refrow"></div>');
   var f=el('<div class="fields"></div>');
-  var dir=sel("pay-dir",[["in","Поступление от родителя"],["out","Выплата педагогу"]],"in");
+  var dir=sel("pay-dir",[["out","Выплата педагогу"]],"out");
   var stu=sel("pay-student",studentOptions(),"");
   var tch=sel("pay-teacher",[["","— выбрать педагога —"]].concat(teacherList().map(function(t){
     return[t.id,t.name];})),"");
   var date=inp("pay-date","date",today());
   var amount=inp("pay-amount","number","",120,"50");
-  var stuLab=labeled("Ученик",stu),tchLab=labeled("Педагог",tch);
-  function syncDir(){
-    stuLab.hidden=dir.value!=="in";
-    tchLab.hidden=dir.value!=="out";
-    amount.placeholder=dir.value==="in"?"сумма оплаты":"сумма выплаты";
-  }
-  dir.onchange=syncDir;
-  f.appendChild(labeled("Операция",dir));
-  f.appendChild(stuLab);f.appendChild(tchLab);
+  f.appendChild(labeled("Педагог",tch));
   f.appendChild(labeled("Дата",date));
   f.appendChild(labeled("Сумма",amount));
   box.appendChild(f);
-  syncDir();
 
   var row=el('<div class="btnrow" style="margin-top:4px"></div>');
   var btn=el('<button class="btn pri" type="button">Внести</button>');
   btn.onclick=function(){
     var amt=+amount.value||0;
     if(!amt){toast("Укажите сумму");return;}
-    if(dir.value==="in"&&!stu.value){toast("Выберите ученика");return;}
-    if(dir.value==="out"&&!tch.value){toast("Выберите педагога");return;}
-    savePayment({id:newId("p"),paidOn:date.value||today(),direction:dir.value,
-      studentId:dir.value==="in"?stu.value:"",teacherId:dir.value==="out"?tch.value:"",
-      amount:amt,note:""});
+    if(!tch.value){toast("Выберите педагога");return;}
+    savePayment({id:newId("p"),paidOn:date.value||today(),direction:"out",
+      studentId:"",teacherId:tch.value,amount:amt,note:""});
     amount.value="";
     toast("Внесено");
   };
@@ -1207,33 +1134,30 @@ function payForm(){
   return box;
 }
 function paymentsCard(){
-  var c=el('<div class="card"><div class="chead"><h2>Движение денег</h2>'+
-    '<span class="hint">Оплаты родителей и выплаты педагогам одним списком</span></div></div>');
+  var c=el('<div class="card"><div class="chead"><h2>Выплаты педагогам</h2>'+
+    '<span class="hint">Оплаты родителей вносятся в таблице начислений, в колонке «Оплачено»</span></div></div>');
   var h=el('<div class="ref"></div>');
-  h.appendChild(acc("pay:new",'<b>Внести оплату или выплату</b>',"",payForm));
+  h.appendChild(acc("pay:new",'<b>Внести выплату педагогу</b>',"",payForm));
   c.appendChild(h);
   var scroll=el('<div class="tscroll"></div>');
-  var tbl=el('<table><thead><tr><th>Дата</th><th>Операция</th><th>Кто</th>'+
-    '<th class="r">Поступило</th><th class="r">Выплачено</th><th></th>'+
+  var tbl=el('<table><thead><tr><th>Дата</th><th>Педагог</th>'+
+    '<th class="r">Выплачено</th><th></th>'+
     "</tr></thead><tbody></tbody></table>");
-  var tb=tbl.querySelector("tbody"),list=paymentsList(),sIn=0,sOut=0;
+  var tb=tbl.querySelector("tbody"),sOut=0;
+  var list=paymentsList().filter(function(p){return p.direction==="out";});
   list.forEach(function(p){
-    var isIn=p.direction==="in";
-    var who=isIn?(state.units[p.studentId]||{}).name:(state.teachers[p.teacherId]||{}).name;
-    if(isIn)sIn+=+p.amount||0;else sOut+=+p.amount||0;
-    var tr=el("<tr><td>"+esc(fmtDate(p.paidOn))+"</td><td>"+
-      (isIn?'<span class="pill ok">от родителя</span>':'<span class="pill warn">педагогу</span>')+
-      "</td><td>"+esc(who||"запись удалена")+'</td><td class="r">'+
-      (isIn?esc(fmtMoney(p.amount)):'<span class="sub">—</span>')+'</td><td class="r">'+
-      (isIn?'<span class="sub">—</span>':esc(fmtMoney(p.amount)))+"</td></tr>");
+    var who=(state.teachers[p.teacherId]||{}).name;
+    sOut+=+p.amount||0;
+    var tr=el("<tr><td>"+esc(fmtDate(p.paidOn))+"</td><td>"+esc(who||"запись удалена")+
+      '</td><td class="r">'+esc(fmtMoney(p.amount))+"</td></tr>");
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
     rm.onclick=function(){deletePayment(p.id);toast("Запись удалена");};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
-  if(!list.length)tb.appendChild(el('<tr><td colspan="6" class="sub">Записей пока нет.</td></tr>'));
-  else tb.appendChild(el('<tr class="tot"><td colspan="3">Итого</td><td class="r">'+
-    esc(fmtMoney(sIn))+'</td><td class="r">'+esc(fmtMoney(sOut))+"</td><td></td></tr>"));
+  if(!list.length)tb.appendChild(el('<tr><td colspan="4" class="sub">Выплат пока нет.</td></tr>'));
+  else tb.appendChild(el('<tr class="tot"><td colspan="2">Итого</td><td class="r">'+
+    esc(fmtMoney(sOut))+"</td><td></td></tr>"));
   scroll.appendChild(tbl);c.appendChild(scroll);
   return c;
 }
@@ -1248,7 +1172,7 @@ function debtsCard(){
   rows.sort(function(a,b){return b.d-a.d;});
   if(!rows.length)return null;
   var c=el('<div class="card"><div class="chead"><h2>Кто не доплатил</h2>'+
-    '<span class="hint">Продано больше, чем поступило</span></div><div class="tscroll"></div></div>');
+    '<span class="hint">Начислено больше, чем поступило</span></div><div class="tscroll"></div></div>');
   var tbl=el('<table><thead><tr><th>Ученик</th><th>Родитель</th><th>Группа</th>'+
     '<th class="r">Остаток занятий</th><th class="r">Долг</th>'+
     "</tr></thead><tbody></tbody></table>");
@@ -1294,7 +1218,6 @@ function teacherDebtCard(){
 function viewDocs(){
   var wrap=el('<div class="stack"></div>');
   wrap.appendChild(billCard());
-  wrap.appendChild(salesCard());
   wrap.appendChild(paymentsCard());
   var d=debtsCard();if(d)wrap.appendChild(d);
   wrap.appendChild(teacherDebtCard());
@@ -1469,22 +1392,24 @@ function teacherToRow(t){
 function unitFromRow(r){
   return{id:r.id,kind:r.kind||"solo",name:r.name||"",parent:r.parent||"",teacherId:r.teacher_id||"",
     weekdays:(r.weekdays||[]).map(Number),memberIds:r.member_ids||[],groupId:r.group_id||"",
-    rateName:r.rate_name||"",channel:r.channel||"",active:r.active!==false,order:r.order_no};
+    rateName:r.rate_name||"",tariffName:r.tariff_name||"",channel:r.channel||"",active:r.active!==false,order:r.order_no};
 }
 function unitToRow(u){
   return{id:u.id,kind:u.kind||"solo",name:u.name||"",parent:u.parent||"",teacher_id:u.teacherId||"",
     weekdays:(u.weekdays||[]).map(Number),member_ids:u.memberIds||[],group_id:u.groupId||"",
-    rate_name:u.rateName||"",channel:u.channel||"",active:u.active!==false,
+    rate_name:u.rateName||"",tariff_name:u.tariffName||"",channel:u.channel||"",active:u.active!==false,
     order_no:u.order==null?900:u.order,format:u.kind==="group"?"group":"individual"};
 }
 function monthFromRow(r){return{unitId:r.unit_id,month:r.month,days:r.days||{},note:r.note||""};}
 function subFromRow(r){
-  return{id:r.id,studentId:r.student_id,soldOn:r.sold_on,pkg:r.package_name||"",
-    lessons:+r.lessons||0,price:num(r.price),discount:num(r.discount),total:num(r.total),note:r.note||""};
+  return{id:r.id,studentId:r.student_id,soldOn:r.sold_on,ym:r.ym||ymOfDate(r.sold_on),
+    pkg:r.package_name||"",lessons:+r.lessons||0,price:num(r.price),discount:num(r.discount),
+    gift:num(r.gift),total:num(r.total),note:r.note||""};
 }
 function subToRow(s){
-  return{id:s.id,student_id:s.studentId,sold_on:s.soldOn,package_name:s.pkg||"",
-    lessons:+s.lessons||0,price:num(s.price),discount:num(s.discount),total:num(s.total),note:s.note||""};
+  return{id:s.id,student_id:s.studentId,sold_on:s.soldOn,ym:s.ym||ymOfDate(s.soldOn),
+    package_name:s.pkg||"",lessons:+s.lessons||0,price:num(s.price),discount:num(s.discount),
+    gift:num(s.gift),total:num(s.total),note:s.note||""};
 }
 function payFromRow(r){
   return{id:r.id,paidOn:r.paid_on,direction:r.direction,studentId:r.student_id||"",
