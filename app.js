@@ -161,6 +161,7 @@ function monthsWithLessons(){
 /* Статус дня для ученика в конкретном занятии.
    Для группы отметка ученика перекрывает отметку группы (посещаемость),
    для индивидуального занятия отметка одна — самого занятия. */
+function sure(msg){try{return window.confirm(msg);}catch(e){return false;}}
 function curYm(){var d=new Date();return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2);}
 function luStatus(u,lu,ym,day){
   if(lu.kind!=="group")return dayStatus(lu,ym,day,mdoc(lu,ym));
@@ -826,7 +827,7 @@ function refTariffs(){
     tr.appendChild(settingCell("tariffs",i,"price",x.price,"number",96));
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
-    rm.onclick=function(){var l=tariffs().slice();l.splice(i,1);saveSettingList("tariffs",l);};
+    rm.onclick=function(){if(!sure("Удалить тариф «"+(x.name||"без названия")+"»?"))return;var l=tariffs().slice();l.splice(i,1);saveSettingList("tariffs",l);};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
   if(!list.length)tb.appendChild(el('<tr><td colspan="4" class="sub">Пока ни одного тарифа.</td></tr>'));
@@ -848,7 +849,7 @@ function refRates(){
     tr.appendChild(settingCell("teacherTariffs",i,"price",x.price,"number",110));
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
-    rm.onclick=function(){var l=teacherTariffs().slice();l.splice(i,1);saveSettingList("teacherTariffs",l);};
+    rm.onclick=function(){if(!sure("Удалить ставку «"+(x.name||"без названия")+"»?"))return;var l=teacherTariffs().slice();l.splice(i,1);saveSettingList("teacherTariffs",l);};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
   if(!list.length)tb.appendChild(el('<tr><td colspan="3" class="sub">Пока ни одного тарифа.</td></tr>'));
@@ -1008,6 +1009,7 @@ function lessonLine(u,lu){
   var rm=el('<button class="btn sm" type="button" style="margin-left:auto">'+
     (lu.kind==="group"?"Убрать из группы":"Удалить занятие")+"</button>");
   rm.onclick=function(){
+    if(!sure(lu.kind==="group"?"Убрать ученика «"+u.name+"» из группы «"+lu.name+"»?":"Удалить индивидуальное занятие «"+luLabel(u,lu)+"» у ученика «"+u.name+"»?"))return;
     if(lu.kind==="group"){leaveGroup(lu,u.id);toast(u.name+" больше не в группе «"+lu.name+"»");}
     else{saveUnit(lu.id,{active:false});toast("Индивидуальные занятия удалены");}
   };
@@ -1060,6 +1062,7 @@ function unitRow(u){
     (u.kind==="group"?"группа":"ученик")+"</span></div>");
   var del=el('<button class="btn sm" type="button" style="margin-left:auto">В архив</button>');
   del.onclick=function(){
+    if(!sure("Перенести «"+u.name+"» в архив?"))return;
     if(u.kind==="solo")groupsOf(u).forEach(function(g){leaveGroup(g,u.id);});
     saveUnit(u.id,{active:false});toast("Перенесено в архив");
   };
@@ -1110,7 +1113,7 @@ function unitRow(u){
       '</span><span class="sub">'+esc(m.parent||"родитель не указан")+'</span>'+
       '<span class="sub">остаток '+fmtNum(lessonsLeft(m))+" зан.</span></div>");
     var rm=el('<button class="btn sm" type="button">Убрать</button>');
-    rm.onclick=function(){leaveGroup(u,m.id);};
+    rm.onclick=function(){if(!sure("Убрать ученика «"+m.name+"» из группы «"+u.name+"»?"))return;leaveGroup(u,m.id);};
     mr.appendChild(rm);mems.appendChild(mr);
   });
   if(!list.length)mems.appendChild(el('<p class="sub" style="margin:0">Пока никого.</p>'));
@@ -1407,7 +1410,7 @@ function billCard(){
       sub.appendChild(el('<td class="r sub">'+fmtNum(r.out)+"</td>"));
       var td=document.createElement("td");
       var rm=el('<button class="btn sm" type="button">Убрать</button>');
-      rm.onclick=function(){deleteSub(b.id);toast("Начисление убрано");};
+      rm.onclick=function(){if(!sure("Убрать начисление?"))return;deleteSub(b.id);toast("Начисление убрано");};
       td.appendChild(rm);sub.appendChild(td);
       tb.appendChild(sub);
     });
@@ -1468,7 +1471,7 @@ function paymentsCard(){
       '</td><td class="r">'+esc(fmtMoney(p.amount))+"</td></tr>");
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
-    rm.onclick=function(){deletePayment(p.id);toast("Запись удалена");};
+    rm.onclick=function(){if(!sure("Удалить запись о выплате?"))return;deletePayment(p.id);toast("Запись удалена");};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
   if(!list.length)tb.appendChild(el('<tr><td colspan="4" class="sub">Выплат пока нет.</td></tr>'));
