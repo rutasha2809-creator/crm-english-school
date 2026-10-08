@@ -999,10 +999,11 @@ function leaveGroup(g,uid){
 function lessonLine(u,lu){
   var box=el('<div class="lesson"></div>');
   var head=el('<div class="lhead"><b>'+esc(luLabel(u,lu))+"</b></div>");
-  var rm=el('<button class="btn sm" type="button" style="margin-left:auto">Убрать</button>');
+  var rm=el('<button class="btn sm" type="button" style="margin-left:auto">'+
+    (lu.kind==="group"?"Убрать из группы":"Удалить занятие")+"</button>");
   rm.onclick=function(){
-    if(lu.kind==="group")leaveGroup(lu,u.id);
-    else{saveUnit(lu.id,{active:false});toast("Индивидуальные занятия убраны");}
+    if(lu.kind==="group"){leaveGroup(lu,u.id);toast(u.name+" больше не в группе «"+lu.name+"»");}
+    else{saveUnit(lu.id,{active:false});toast("Индивидуальные занятия удалены");}
   };
   head.appendChild(rm);box.appendChild(head);
   if(lu.kind==="group"){
@@ -1022,12 +1023,18 @@ function lessonLine(u,lu){
   f.appendChild(field("Тариф ученика","il-tn-"+lu.id,lu.tariffName||"",null,
     function(v){saveUnit(lu.id,{tariffName:v});},tariffOptions(lu.tariffName)));
   box.appendChild(f);
+  if(!lu.teacherId||!lu.tariffName)
+    box.appendChild(el('<p class="sub" style="margin:0">Выберите педагога и тариф, затем отметьте даты занятий в календаре. '+
+      "Всё сохраняется сразу, отдельной кнопки не нужно.</p>"));
   box.appendChild(planField(lu));
   return box;
 }
 function addLesson(u,value){
   if(!value)return;
   if(value==="ind"){
+    var empty=indUnits(u.id).filter(function(x){
+      return !x.teacherId&&!x.tariffName&&!planDays(x,state.ym).length;})[0];
+    if(empty){toast("Пустое индивидуальное занятие уже добавлено — заполните его");return;}
     var id=newId("i");
     var body={kind:"ind",name:"Индивидуально",parent:u.id,teacherId:u.teacherId||"",
       rateName:"",tariffName:"",weekdays:[],active:true,
