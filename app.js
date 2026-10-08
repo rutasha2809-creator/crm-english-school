@@ -188,6 +188,34 @@ function billTotal(b){
   var gross=(+b.lessons||0)*(+b.price||0);
   return Math.max(0,Math.round(gross-gross*(+b.discount||0)/100)-(+b.gift||0));
 }
+/* Месяцы, по которым есть хоть что-то: отметки занятий или начисления. */
+function allMonths(){
+  var set={};
+  for(var k in state.months){
+    var m=state.months[k];
+    if(m&&m.days&&Object.keys(m.days).length)set[m.month]=1;
+  }
+  for(var s in state.subs){if(state.subs[s].ym)set[state.subs[s].ym]=1;}
+  return Object.keys(set).sort();
+}
+function billLessons(u,ym){var b=billOf(u,ym);return b?+b.lessons||0:0;}
+/* Ручная поправка остатка на начало месяца. */
+function adjId(u,ym){return "adj-"+ym+"-"+u.id;}
+function manualCarry(u,ym){var a=state.subs[adjId(u,ym)];return a?+a.lessons||0:0;}
+function legacyCarry(u){var a=state.subs["adj-"+u.id];return a?+a.lessons||0:0;}
+/* Перешло с прошлых месяцев: начислено минус израсходовано за все месяцы до этого. */
+function carryIn(u,ym){
+  var total=legacyCarry(u);
+  allMonths().forEach(function(m){
+    if(m>=ym)return;
+    total+=billLessons(u,m)+manualCarry(u,m)-studentStats(u,m).held;
+  });
+  return total+manualCarry(u,ym);
+}
+/* Остаток на конец месяца — он же перейдёт в следующий. */
+function carryOut(u,ym){
+  return carryIn(u,ym)+billLessons(u,ym)-studentStats(u,ym).held;
+}
 /* Фактическая оплата родителя за месяц — одна строка на «ученик + месяц». */
 function payId(u,ym){return "in-"+ym+"-"+u.id;}
 function paidOf(u,ym){var p=state.payments[payId(u,ym)];return p?+p.amount||0:0;}
@@ -1125,32 +1153,14 @@ function studentOptions(empty){
   }));
 }
 /* ---------- начисление за месяц ---------- */
-/* Одна строка на ученика: занятия по плану минус остаток, цена занятия из его
-   тарифа, скидка и подарок, сумма и фактическая оплата. */
+/* Одна строка на ученика за выбранный месяц: что перешло с прошлого месяца,
+   сколько занятий по календарю, сумма и фактическая оплата. */
 function billYm(){return state.ym;}
 function billRow(u){
   var ym=billYm(),plan=planDays(lessonUnit(u),ym).length;
-  var b=billOf(u,ym),left=lessonsLeft(u);
-  var leftBefore=left+(b?+b.lessons||0:0);
-  var toBill=Math.max(0,plan-Math.max(0,leftBefore));
-  return{u:u,plan:plan,left:left,leftBefore:leftBefore,toBill:toBill,b:b,
-    paid:paidOf(u,ym)};
-}
-/* Остаток правится прямо в таблице: разница живёт отдельной строкой-поправкой. */
-function adjId(u){return "adj-"+u.id;}
-function setLeft(u,value){
-  var cur=lessonsLeft(u),old=state.subs[adjId(u)],had=old?+old.lessons||0:0;
-  saveSub({id:adjId(u),studentId:u.id,ym:"",soldOn:ymShift(state.ym,-1)+"-28",
-    pkg:"Перенос с прошлого периода",lessons:had+(value-cur),price:0,discount:0,
-    gift:0,total:0,note:"carry"});
-}
-function leftCell(u){
-  var td=document.createElement("td");td.className="r";
-  var i=document.createElement("input");
-  i.type="number";i.step="1";i.className="amt";i.style.width="68px";
-  i.id="left-"+u.id;i.value=lessonsLeft(u);
-  i.onchange=function(){setLeft(u,+i.value||0);};
-  td.appendChild(i);return td;
+  var cin=carryIn(u,ym),b=billOf(u,ym);
+  var toBill=Math.max(0,plan-Math.max(0,cin));
+  return{u:u,plan:plan,cin:cin,toBill:toBill,b:b,paid:paidOf(u,ym),out:carryOut(u,ym)};
 }
 function makeBill(u,lessons){
   var ym=billYm();
@@ -1169,20 +1179,25 @@ function setPaid(u,amount){
   savePayment({id:payId(u,ym),paidOn:ym+"-01",direction:"in",studentId:u.id,
     teacherId:"",amount:amount,note:""});
 }
-function numCell(id,value,width,step,onchange,suffix){
+/* Правка «перешло» хранится поправкой этого месяца и прошлые месяцы не трогает. */
+function setCarry(u,value){
+  var ym=billYm(),cur=carryIn(u,ym),had=manualCarry(u,ym);
+  saveSub({id:adjId(u,ym),studentId:u.id,ym:ym,soldOn:ym+"-01",
+    pkg:"Перешло с прошлого месяца",lessons:had+(value-cur),price:0,discount:0,
+    gift:0,total:0,note:"carry"});
+}
+function numCell(id,value,width,step,onchange){
   var td=document.createElement("td");td.className="r";
   var i=document.createElement("input");
   i.type="number";i.step=step||"1";i.className="amt";i.style.width=width+"px";
   i.id=id;i.value=value===0?"0":value;
   i.onchange=function(){onchange(+i.value||0);};
-  td.appendChild(i);
-  if(suffix)td.appendChild(document.createTextNode(" "+suffix));
-  return td;
+  td.appendChild(i);return td;
 }
 function billCard(){
   var ym=billYm();
   var c=el('<div class="card"><div class="chead"><h2>Начисления за '+esc(ymLabel(ym))+'</h2>'+
-    '<span class="hint">Занятий по плану минус остаток, цена из тарифа ученика; скидка в процентах, подарок в рублях</span>'+
+    '<span class="hint">Всё в строке — за этот месяц. «Перешло» — остаток занятий с прошлых месяцев</span>'+
     '</div></div>');
   var bar=el('<div class="btnrow" style="padding:10px 14px 0"></div>');
   var all=el('<button class="btn pri" type="button">Начислить всем по плану</button>');
@@ -1198,28 +1213,33 @@ function billCard(){
   bar.appendChild(all);c.appendChild(bar);
   var scroll=el('<div class="tscroll"></div>');
   var tbl=el('<table><thead><tr><th>Ученик</th><th>Группа</th>'+
-    '<th class="r">По плану</th><th class="r">Остаток</th><th class="r">Занятий</th>'+
+    '<th class="r">Перешло</th><th class="r">По плану</th><th class="r">Занятий</th>'+
     '<th class="r">Цена</th><th class="r">Скидка, %</th><th class="r">Подарок, ₽</th>'+
-    '<th class="r">К оплате</th><th class="r">Оплачено</th><th class="r">Долг</th><th></th>'+
+    '<th class="r">К оплате</th><th class="r">Оплачено</th><th class="r">Долг</th>'+
+    '<th class="r">Перейдёт</th><th></th>'+
     "</tr></thead><tbody></tbody></table>");
   var tb=tbl.querySelector("tbody"),T={plan:0,charge:0,paid:0};
   students().forEach(function(u){
     var r=billRow(u),g=groupOf(u),tr=document.createElement("tr");
     T.plan+=r.plan;
-    tr.appendChild(el("<td>"+esc(u.name)+"</td>"));
+    tr.appendChild(el("<td>"+esc(u.name)+(u.parent?' <span class="sub">'+esc(u.parent)+"</span>":"")+"</td>"));
     tr.appendChild(el('<td class="sub">'+(g?esc(g.name):"—")+"</td>"));
+    tr.appendChild(numCell("c-in-"+u.id,r.cin,66,"1",function(v){setCarry(u,v);}));
     tr.appendChild(el('<td class="r sub">'+fmtNum(r.plan)+"</td>"));
-    tr.appendChild(leftCell(u));
     if(!r.b){
       tr.appendChild(el('<td class="r"><b>'+fmtNum(r.toBill)+"</b></td>"));
-      tr.appendChild(el('<td colspan="5" class="sub">'+
-        (priceOf(u)?"начисление ещё не сделано":"не выбран тариф ученика")+"</td>"));
+      tr.appendChild(el('<td colspan="3" class="sub">начисление ещё не сделано</td>'));
       tr.appendChild(el('<td class="r sub">—</td>'));
+      tr.appendChild(numCell("b-paid-"+u.id,r.paid,96,"100",function(v){setPaid(u,v);}));
+      tr.appendChild(el('<td class="r nowrap">'+(r.paid?'<span class="pill ok">переплата '+
+        esc(fmtMoney(r.paid))+"</span>":'<span class="sub">—</span>')+"</td>"));
+      tr.appendChild(el('<td class="r sub">'+fmtNum(r.out)+"</td>"));
       var td0=document.createElement("td");
       var mk=el('<button class="btn sm" type="button">Начислить</button>');
       mk.onclick=function(){makeBill(u,r.toBill);};
-      if(!r.toBill||!priceOf(u))mk.disabled=true;
+      if(!r.toBill)mk.disabled=true;
       td0.appendChild(mk);tr.appendChild(td0);
+      T.paid+=r.paid;
       tb.appendChild(tr);return;
     }
     var b=r.b,charge=billTotal(b),debt=charge-r.paid;
@@ -1234,16 +1254,17 @@ function billCard(){
       (debt>0?'<span class="pill warn">'+esc(fmtMoney(debt))+"</span>":
        debt<0?'<span class="pill ok">переплата '+esc(fmtMoney(-debt))+"</span>":
        '<span class="pill ok">оплачено</span>')+"</td>"));
+    tr.appendChild(el('<td class="r sub">'+fmtNum(r.out)+"</td>"));
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Убрать</button>');
     rm.onclick=function(){deleteSub(b.id);toast("Начисление убрано");};
     td.appendChild(rm);tr.appendChild(td);
     tb.appendChild(tr);
   });
-  if(!students().length)tb.appendChild(el('<tr><td colspan="12" class="sub">Пока ни одного ученика.</td></tr>'));
-  else tb.appendChild(el('<tr class="tot"><td colspan="2">Итого</td><td class="r">'+fmtNum(T.plan)+
-    '</td><td colspan="5"></td><td class="r">'+esc(fmtMoney(T.charge))+'</td><td class="r">'+
-    esc(fmtMoney(T.paid))+'</td><td class="r">'+esc(fmtMoney(T.charge-T.paid))+"</td><td></td></tr>"));
+  if(!students().length)tb.appendChild(el('<tr><td colspan="13" class="sub">Пока ни одного ученика.</td></tr>'));
+  else tb.appendChild(el('<tr class="tot"><td colspan="3">Итого</td><td class="r">'+fmtNum(T.plan)+
+    '</td><td colspan="4"></td><td class="r">'+esc(fmtMoney(T.charge))+'</td><td class="r">'+
+    esc(fmtMoney(T.paid))+'</td><td class="r">'+esc(fmtMoney(T.charge-T.paid))+"</td><td colspan=\"2\"></td></tr>"));
   scroll.appendChild(tbl);c.appendChild(scroll);
   return c;
 }
