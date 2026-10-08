@@ -220,3 +220,10 @@ h1 span{font-size:12.5px}
 .calday.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
 .calnav{display:flex;align-items:center;gap:8px;margin:2px 0 6px}
 .calmonth{font-family:var(--font-ui);font-size:13.5px;min-width:130px;text-align:center}
+
+/* индикатор сохранения */
+.savebadge{font-family:var(--font-ui);font-size:12px;padding:3px 9px;border-radius:999px;
+  white-space:nowrap;color:var(--ink-3)}
+.savebadge.busy{background:var(--surface-2);color:var(--ink-2)}
+.savebadge.ok{background:var(--ok-soft);color:var(--ok)}
+.savebadge.bad{background:var(--bad-soft);color:var(--bad)}

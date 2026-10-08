@@ -218,6 +218,30 @@ function lessonUnitsOf(tid){
 }
 function newId(prefix){return prefix+Date.now().toString(36)+Math.floor(Math.random()*1296).toString(36);}
 /* ---------- запись ---------- */
+/* Видимое подтверждение: каждая правка уходит в базу сразу, индикатор в шапке
+   показывает, идёт ли запись и когда данные сохранились. */
+var saving=0,savedAt=null,saveErr=null;
+function saveBadge(){
+  var n=document.getElementById("h-save");
+  if(!n)return;
+  n.className="savebadge";
+  if(saveErr){n.classList.add("bad");n.textContent="Не сохранено: "+saveErr;return;}
+  if(saving>0){n.classList.add("busy");n.textContent="Сохраняю…";return;}
+  if(savedAt){
+    n.classList.add("ok");
+    n.textContent="Сохранено в "+pad(savedAt.getHours())+":"+pad(savedAt.getMinutes());
+    return;
+  }
+  n.textContent="";
+}
+function track(p){
+  saving++;saveErr=null;saveBadge();
+  return p.then(function(r){
+    saving--;savedAt=new Date();saveBadge();return r;
+  },function(e){
+    saving--;saveErr=(e&&(e.message||e.code))||"ошибка";saveBadge();throw e;
+  });
+}
 function needWrite(){
   if(!session){toast("Сначала войдите");return false;}
   return true;
@@ -237,7 +261,7 @@ function saveMonth(u,patch){
   for(var d in next.days){if(!next.days[d])delete next.days[d];}
   state.months[id]=next;render();
   if(pending[id])return pending[id];
-  pending[id]=API.saveMonth(next).catch(saveFailed).then(function(){delete pending[id];});
+  pending[id]=track(API.saveMonth(next)).catch(saveFailed).then(function(){delete pending[id];});
   return pending[id];
 }
 /* Запись отметок в произвольный месяц, не только в выбранный. */
@@ -248,49 +272,49 @@ function saveMonth2(u,ym,days){
   var next={unitId:u.id,month:ym,days:Object.assign({},cur.days||{},days),note:cur.note||""};
   for(var k in next.days){if(!next.days[k])delete next.days[k];}
   state.months[id]=next;render();
-  return API.saveMonth(next).catch(saveFailed);
+  return track(API.saveMonth(next)).catch(saveFailed);
 }
 function saveUnit(uid,patch){
   if(!needWrite())return Promise.resolve();
   var cur=state.units[uid];if(!cur)return Promise.resolve();
   var next=Object.assign({},cur,patch);next.id=uid;
   state.units[uid]=next;render();
-  return API.saveUnit(uid,next).catch(saveFailed);
+  return track(API.saveUnit(uid,next)).catch(saveFailed);
 }
 function saveTeacher(tid,patch){
   if(!needWrite())return Promise.resolve();
   var cur=state.teachers[tid];if(!cur)return Promise.resolve();
   var next=Object.assign({},cur,patch);next.id=tid;
   state.teachers[tid]=next;render();
-  return API.saveTeacher(tid,next).catch(saveFailed);
+  return track(API.saveTeacher(tid,next)).catch(saveFailed);
 }
 function saveSettingList(name,value){
   if(!needWrite())return Promise.resolve();
   var next=Object.assign({},state.settings);next[name]=value;
   state.settings=next;render();
-  return API.saveSettings(next).catch(saveFailed);
+  return track(API.saveSettings(next)).catch(saveFailed);
 }
 /* продажа абонемента */
 function saveSub(sub){
   if(!needWrite())return Promise.resolve();
   state.subs[sub.id]=sub;render();
-  return API.saveSub(sub).catch(saveFailed);
+  return track(API.saveSub(sub)).catch(saveFailed);
 }
 function deleteSub(id){
   if(!needWrite())return Promise.resolve();
   delete state.subs[id];render();
-  return API.deleteSub(id).catch(saveFailed);
+  return track(API.deleteSub(id)).catch(saveFailed);
 }
 /* движение денег */
 function savePayment(p){
   if(!needWrite())return Promise.resolve();
   state.payments[p.id]=p;render();
-  return API.savePayment(p).catch(saveFailed);
+  return track(API.savePayment(p)).catch(saveFailed);
 }
 function deletePayment(id){
   if(!needWrite())return Promise.resolve();
   delete state.payments[id];render();
-  return API.deletePayment(id).catch(saveFailed);
+  return track(API.deletePayment(id)).catch(saveFailed);
 }
 /* ---------- переименование в справочниках ---------- */
 /* Ссылки на старое название обновляются сами. Проданные абонементы не трогаем:
@@ -975,7 +999,7 @@ function addUnit(kind){
   state.units[id]=Object.assign({id:id},body);
   state.open=state.open||{};state.open[(kind==="group"?"g:":"u:")+id]=1;
   render();
-  API.saveUnit(id,body).catch(saveFailed);
+  track(API.saveUnit(id,body)).catch(saveFailed);
 }
 function addTeacher(){
   if(!needWrite())return;
@@ -985,7 +1009,7 @@ function addTeacher(){
   state.teachers[id]=Object.assign({id:id},body);
   state.open=state.open||{};state.open["t:"+id]=1;
   render();
-  API.saveTeacher(id,body).catch(saveFailed);
+  track(API.saveTeacher(id,body)).catch(saveFailed);
 }
 
 /* ---------- render ---------- */
