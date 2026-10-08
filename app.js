@@ -4,7 +4,7 @@ var MONTHS=["январь","февраль","март","апрель","май","
 var MONTHS_IN=["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
 var DOW=["пн","вт","ср","чт","пт","сб","вс"];
 var STATUS_ORDER_PLAN=["plan","done","pc","c"];
-var MARK={plan:"",done:"✓",pc:"₽",c:"×"};
+var MARK={plan:"",done:"✓",pc:"₽",c:"×",off:"–"};
 var CLS={plan:"c-plan",done:"c-done",pc:"c-pc",c:"c-c",off:"c-off"};
 
 var state={tab:"month",ref:"teachers",sale:null,cal:{},rep:{from:null,to:null},ym:null,
@@ -159,6 +159,7 @@ function studentStats(u,ym){
   var n=daysIn(ym),plan=0,done=0,pc=0,canc=0;
   for(var d=1;d<=n;d++){
     var s=studentStatus(u,ym,d);
+    if(s==="off")continue;          /* каникулы: день не входит в план ученика */
     if(s==="plan")plan++;
     else if(s==="done"){done++;plan++;}
     else if(s==="pc"){pc++;plan++;}
@@ -507,6 +508,7 @@ function viewJournal(){
     '<span><i class="c-done">✓</i>проведено</span>'+
     '<span><i class="c-pc">₽</i>отмена с оплатой</span>'+
     '<span><i class="c-c">×</i>не было, без оплаты</span>'+
+    '<span><i class="c-off">–</i>не занимается: каникулы</span>'+
     "</div>"));
   var btns=el('<div class="btnrow"></div>');
   var confirmBtn=el('<button class="btn pri" type="button">Подтвердить план по сегодня</button>');
@@ -562,7 +564,7 @@ function viewJournal(){
           mb.className="cell"+(st2!=="none"?" "+CLS[st2]:"")+(own?"":" inherit");
           mb.textContent=MARK[st2]||"";
           mb.title=m.name+", "+d3+" "+MONTHS_IN[ymParts(ym).m-1]+
-            (own?"":" — как у группы");
+            (own?(st2==="off"?" — не занимается":""):" — как у группы");
           mb.disabled=gst==="none";
           mb.setAttribute("data-m",m.id);mb.setAttribute("data-g",lu.id);mb.setAttribute("data-d",d3);
           mb.onclick=onMemberCell;
@@ -600,7 +602,7 @@ function onMemberCell(ev){
   var mid=ev.currentTarget.getAttribute("data-m"),d=+ev.currentTarget.getAttribute("data-d");
   var m=state.units[mid];if(!m)return;
   var own=(mdoc(m,state.ym).days||{})[String(d)];
-  var next=own==="c"?"pc":own==="pc"?null:"c";
+  var next=own==="off"?"c":own==="c"?"pc":own==="pc"?null:"off";
   var patch={};patch[String(d)]=next;
   saveMonth(m,{days:patch});
 }
@@ -1157,7 +1159,7 @@ function studentOptions(empty){
    сколько занятий по календарю, сумма и фактическая оплата. */
 function billYm(){return state.ym;}
 function billRow(u){
-  var ym=billYm(),plan=planDays(lessonUnit(u),ym).length;
+  var ym=billYm(),plan=studentStats(u,ym).plan;
   var cin=carryIn(u,ym),b=billOf(u,ym);
   var toBill=Math.max(0,plan-Math.max(0,cin));
   return{u:u,plan:plan,cin:cin,toBill:toBill,b:b,paid:paidOf(u,ym),out:carryOut(u,ym)};
