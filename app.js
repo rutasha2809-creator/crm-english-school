@@ -3,7 +3,7 @@
 var MONTHS=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 var MONTHS_IN=["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
 var DOW=["пн","вт","ср","чт","пт","сб","вс"];
-var STATUS_ORDER_PLAN=["none","plan","done","pc","c"];
+var STATUS_ORDER_PLAN=["plan","done","pc","c"];
 var MARK={plan:"",done:"✓",pc:"₽",c:"×"};
 var CLS={plan:"c-plan",done:"c-done",pc:"c-pc",c:"c-c",off:"c-off"};
 
@@ -511,7 +511,10 @@ function viewJournal(){
         b.type="button";
         b.className="cell"+(st!=="none"?" "+CLS[st]:"");
         b.textContent=MARK[st]||"";
-        b.title=label+", "+d2+" "+MONTHS_IN[ymParts(ym).m-1];
+        b.title=st==="none"
+          ? label+": "+d2+" "+MONTHS_IN[ymParts(ym).m-1]+" занятия нет по расписанию"
+          : label+", "+d2+" "+MONTHS_IN[ymParts(ym).m-1];
+        b.disabled=st==="none";
         b.setAttribute("data-u",lu.id);b.setAttribute("data-d",d2);
         b.onclick=onCell;
         grid.appendChild(b);
@@ -550,15 +553,18 @@ function viewJournal(){
     'Занятия в этом месяце не назначены: '+esc(noWd.join(", "))+"</p></div>"));
   return wrap;
 }
+/* В журнале меняется только статус занятия: добавить или убрать день
+   можно лишь в календаре группы или индивидуального занятия. */
 function onCell(ev){
   var uid=ev.currentTarget.getAttribute("data-u"),d=+ev.currentTarget.getAttribute("data-d");
   var lu=state.units[uid];if(!lu)return;
   var md=mdoc(lu),cur=dayStatus(lu,state.ym,d,md);
-  var order=STATUS_ORDER_PLAN;
-  var i=order.indexOf(cur);if(i<0)i=0;
-  var next=order[(i+1)%order.length];
-  var patch={};
-  patch[String(d)]=next==="none"?null:next;
+  if(cur==="none"){
+    toast("В этот день занятия нет. Даты задаются в карточке группы или индивидуального занятия");
+    return;
+  }
+  var order=STATUS_ORDER_PLAN,i=order.indexOf(cur);if(i<0)i=0;
+  var patch={};patch[String(d)]=order[(i+1)%order.length];
   saveMonth(lu,{days:patch});
 }
 /* Клик по строке ученика: как у группы → не пришёл → пропуск с оплатой. */
