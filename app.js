@@ -1585,154 +1585,290 @@ function viewDocs(){
   return wrap;
 }
 /* ---------- экран: отчёты ---------- */
-function ymRange(from,to){
-  var out=[],cur=from;
-  if(!from||!to||from>to)return out;
-  for(var i=0;i<60&&cur<=to;i++){out.push(cur);cur=ymShift(cur,1);}
-  return out;
-}
-function repFrom(){return state.rep.from||ymShift(state.ym,-2);}
-function repTo(){return state.rep.to||state.ym;}
-
-/* Итоги месяца считаются по фактам: продажи, поступления, проведённые занятия, выплаты. */
-function monthTotals(ym){
-  var t={sold:0,soldCount:0,got:0,accrued:0,paid:0,held:0,plan:0};
-  subsList().forEach(function(s){
-    if(ymOfDate(s.soldOn)!==ym||isCarry(s))return;
-    t.sold+=+s.total||0;t.soldCount+=+s.lessons||0;
+/* Отчёт строится за выбранный месяц: кто за что заплатил и кто ещё должен.
+   Оплата вносится по ученику целиком, поэтому между его занятиями она
+   распределяется пропорционально начислениям — иначе сумма по группам
+   не сошлась бы с общей. */
+function allocPaid(u,ym){
+  var lus=lessonUnitsOfStudent(u),acc={},tot=0,parts=[];
+  lus.forEach(function(lu){var c=chargeOf(u,ym,lu);tot+=c;parts.push({id:lu.id,c:c});});
+  var p=paidOf(u,ym);
+  if(!parts.length)return acc;
+  if(tot<=0){acc[parts[0].id]=p;return acc;}
+  var sum=0,best=0;
+  parts.forEach(function(x,i){
+    acc[x.id]=Math.round(p*x.c/tot);sum+=acc[x.id];
+    if(x.c>parts[best].c)best=i;
   });
-  paymentsList().forEach(function(p){
-    if(ymOfDate(p.paidOn)!==ym)return;
-    if(p.direction==="in")t.got+=+p.amount||0;else t.paid+=+p.amount||0;
-  });
-  scheduleUnits().forEach(function(lu){
-    var s=unitStats(lu,ym);t.held+=s.held;t.accrued+=s.payout;t.plan+=s.plan;
-  });
-  t.profit=t.sold-t.accrued;
-  return t;
+  acc[parts[best].id]+=p-sum;
+  return acc;
 }
-function csvCell(v){
-  var s=String(v==null?"":v);
-  return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+function luStudents(lu,ym){
+  var list=lu.kind==="group"?groupMembers(lu):[state.units[lu.parent]];
+  return list.filter(function(u){
+    return u&&u.kind==="solo"&&u.active!==false&&!beforeStart(u,lu,ym);
+  }).sort(byName);
 }
-function downloadCsv(name,rows){
-  var csv=rows.map(function(r){return r.map(csvCell).join(";");}).join("\r\n");
-  var blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
-  var url=URL.createObjectURL(blob);
-  var a=document.createElement("a");
-  a.href=url;a.download=String(name).replace(/[^\wА-Яа-яёЁ.-]+/g,"_")+".csv";
-  document.body.appendChild(a);a.click();
-  setTimeout(function(){URL.revokeObjectURL(url);a.remove();},0);
-  toast("Файл скачан");
-}
-function repCard(title,hint,headers,rows,totalRow,fileName){
-  var c=el('<div class="card"><div class="chead"><h2>'+esc(title)+'</h2>'+
-    (hint?'<span class="hint">'+esc(hint)+"</span>":"")+"</div></div>");
-  var bar=el('<div class="btnrow" style="padding:10px 14px 0"></div>');
-  var dl=el('<button class="btn sm" type="button">Скачать Excel</button>');
-  dl.onclick=function(){
-    var data=[headers].concat(rows.map(function(r){return r.map(function(c2){return c2.v;});}));
-    if(totalRow)data.push(totalRow.map(function(c2){return c2.v;}));
-    downloadCsv(fileName,data);
-  };
-  bar.appendChild(dl);c.appendChild(bar);
-  var scroll=el('<div class="tscroll"></div>');
-  var tbl=document.createElement("table");
-  var thead=el("<thead><tr>"+headers.map(function(h,i){
-    return'<th'+(i?' class="r"':"")+">"+esc(h)+"</th>";}).join("")+"</tr></thead>");
-  tbl.appendChild(thead);
-  var tb=document.createElement("tbody");
-  rows.forEach(function(r){
-    tb.appendChild(el("<tr>"+r.map(function(c2,i){
-      return"<td"+(i?' class="r"':"")+">"+esc(c2.t==null?c2.v:c2.t)+"</td>";}).join("")+"</tr>"));
+function monthReport(ym){
+  var blocks=[],T={lessons:0,charge:0,paid:0},debts=[],D=0;
+  var units=scheduleUnits().slice().sort(function(a,b){
+    var ta=(state.teachers[a.kind==="group"?a.teacherId:effTeacherId(a)]||{}).name||"";
+    var tb=(state.teachers[b.kind==="group"?b.teacherId:effTeacherId(b)]||{}).name||"";
+    return ta.localeCompare(tb,"ru")||String(a.name).localeCompare(String(b.name),"ru");
   });
-  if(!rows.length)tb.appendChild(el('<tr><td colspan="'+headers.length+'" class="sub">Нет данных за выбранный период.</td></tr>'));
-  if(totalRow&&rows.length)tb.appendChild(el('<tr class="tot">'+totalRow.map(function(c2,i){
-    return"<td"+(i?' class="r"':"")+">"+esc(c2.t==null?c2.v:c2.t)+"</td>";}).join("")+"</tr>"));
-  tbl.appendChild(tb);scroll.appendChild(tbl);c.appendChild(scroll);
-  return c;
-}
-function viewReports(){
-  var wrap=el('<div class="stack"></div>');
-  var from=repFrom(),to=repTo(),list=ymRange(from,to);
-
-  /* выбор периода */
-  var head=el('<div class="card"><div class="chead"><h2>Период</h2>'+
-    '<span class="hint">Финансовый итог и свод по педагогам строятся по выбранным месяцам</span></div></div>');
-  var picks=el('<div class="ref" style="grid-auto-flow:column;justify-content:start;gap:12px;align-items:end"></div>');
-  function monthOptions(){
-    var opts=[],cur=ymShift(ymOf(new Date()),-23);
-    for(var i=0;i<36;i++){opts.push([cur,ymLabel(cur)]);cur=ymShift(cur,1);}
-    return opts;
-  }
-  picks.appendChild(field("С месяца","rep-from",from,null,function(v){
-    state.rep.from=v;if(v>repTo())state.rep.to=v;render();},monthOptions()));
-  picks.appendChild(field("По месяц","rep-to",to,null,function(v){
-    state.rep.to=v;if(v<repFrom())state.rep.from=v;render();},monthOptions()));
-  head.appendChild(picks);
-  wrap.appendChild(head);
-
-  /* 1. финансовый итог по месяцам */
-  var T={sold:0,soldCount:0,got:0,accrued:0,paid:0,held:0,profit:0};
-  var fin=list.map(function(ym){
-    var m=monthTotals(ym);
-    ["sold","soldCount","got","accrued","paid","held","profit"].forEach(function(k){T[k]+=m[k];});
-    return[{v:ymLabel(ym)},{v:m.soldCount},{v:m.held},
-      {v:m.sold,t:fmtMoney(m.sold)},{v:m.got,t:fmtMoney(m.got)},
-      {v:m.accrued,t:fmtMoney(m.accrued)},{v:m.paid,t:fmtMoney(m.paid)},
-      {v:m.profit,t:fmtMoney(m.profit)}];
+  var seen={};
+  units.forEach(function(lu){
+    var t=state.teachers[lu.kind==="group"?lu.teacherId:effTeacherId(lu)]||{};
+    var rows=[],S={lessons:0,charge:0,paid:0};
+    luStudents(lu,ym).forEach(function(u){
+      if(!seen[u.id])seen[u.id]=allocPaid(u,ym);
+      var b=billOf(u,ym,lu),st=studentStats(u,ym,lu);
+      var charge=chargeOf(u,ym,lu),paid=seen[u.id][lu.id]||0;
+      if(!b&&!st.plan&&!paid)return;
+      var les=b?+b.lessons||0:0;
+      rows.push({u:u,les:les,price:b?+b.price||0:priceOf(u,lu),
+        dis:b?+b.discount||0:0,gift:b?+b.gift||0:0,
+        held:st.held,charge:charge,paid:paid,debt:charge-paid,billed:!!b});
+      S.lessons+=les;S.charge+=charge;S.paid+=paid;
+    });
+    if(!rows.length)return;
+    T.lessons+=S.lessons;T.charge+=S.charge;T.paid+=S.paid;
+    blocks.push({lu:lu,label:lu.kind==="group"?lu.name:"Индивидуально",
+      teacher:t.name||"педагог не выбран",rows:rows,sum:S});
   });
-  wrap.appendChild(repCard("Финансовый итог за период",
-    "Начислено родителям — по датам начисления; начислено педагогам — по проведённым занятиям",
-    ["Месяц","Начислено занятий","Проведено","Начислено родителям","Получено",
-     "Начислено педагогам","Выплачено","Заработок школы"],
-    fin,
-    [{v:"Итого"},{v:T.soldCount},{v:T.held},
-     {v:T.sold,t:fmtMoney(T.sold)},{v:T.got,t:fmtMoney(T.got)},
-     {v:T.accrued,t:fmtMoney(T.accrued)},{v:T.paid,t:fmtMoney(T.paid)},
-     {v:T.profit,t:fmtMoney(T.profit)}],
-    "Финансовый_итог_"+from+"_"+to));
-
-  /* 2. долги родителей — по всем продажам и оплатам, без привязки к месяцу */
-  var debts=[],dTot=0;
+  /* кто ещё должен — по ученику за этот месяц */
   students().forEach(function(u){
-    var d=debtOf(u);
+    var charge=chargeOf(u,ym),paid=paidOf(u,ym),d=charge-paid;
     if(d<=0)return;
-    var t=state.teachers[effTeacherId(u)]||{},g=groupOf(u);
-    dTot+=d;
-    debts.push([{v:u.name},{v:u.parent||""},{v:g?g.name:""},{v:t.name||""},
-      {v:lessonsLeft(u)},{v:d,t:fmtMoney(d)}]);
+    D+=d;
+    var lus=lessonUnitsOfStudent(u).filter(function(lu){return !beforeStart(u,lu,ym);});
+    debts.push({u:u,
+      what:lus.map(function(lu){return luLabel(u,lu);}).join(", ")||"—",
+      who:lus.map(function(lu){
+        var t=state.teachers[lu.kind==="group"?lu.teacherId:effTeacherId(lu)];
+        return t?t.name:"";}).filter(function(x,i,a){return x&&a.indexOf(x)===i;}).join(", "),
+      charge:charge,paid:paid,debt:d});
   });
-  debts.sort(function(a,b){return b[5].v-a[5].v;});
-  wrap.appendChild(repCard("Долги родителей",
-    "Начислено больше, чем поступило денег; считается за всё время",
-    ["Ученик","Родитель","Группа","Педагог","Остаток занятий","Долг"],
-    debts,[{v:"Итого"},{v:""},{v:""},{v:""},{v:""},{v:dTot,t:fmtMoney(dTot)}],
-    "Долги_родителей"));
-
-  /* 3. по педагогам за период */
-  var byT=[],P={held:0,accrued:0,paid:0};
+  debts.sort(function(a,b){return b.debt-a.debt;});
+  /* педагоги за месяц */
+  var tea=[],P={held:0,accrued:0,paid:0};
   teacherList().forEach(function(t){
     var held=0,accrued=0,paid=0;
-    list.forEach(function(ym){
-      lessonUnitsOf(t.id).forEach(function(lu){
-        var s=unitStats(lu,ym);held+=s.held;accrued+=s.payout;
-      });
-      paymentsList().forEach(function(p){
-        if(p.direction==="out"&&p.teacherId===t.id&&ymOfDate(p.paidOn)===ym)paid+=+p.amount||0;
-      });
+    lessonUnitsOf(t.id).forEach(function(lu){
+      var s=unitStats(lu,ym);held+=s.held;accrued+=s.payout;
+    });
+    paymentsList().forEach(function(p){
+      if(p.direction==="out"&&p.teacherId===t.id&&ymOfDate(p.paidOn)===ym)paid+=+p.amount||0;
     });
     if(!held&&!accrued&&!paid)return;
     P.held+=held;P.accrued+=accrued;P.paid+=paid;
-    byT.push([{v:t.name},{v:held},{v:accrued,t:fmtMoney(accrued)},{v:paid,t:fmtMoney(paid)},
-      {v:accrued-paid,t:fmtMoney(accrued-paid)}]);
+    tea.push({name:t.name,held:held,accrued:accrued,paid:paid,debt:accrued-paid});
   });
-  wrap.appendChild(repCard("По педагогам",
-    "Начислено — за проведённые занятия по назначенной ставке",
-    ["Педагог","Проведено","Начислено","Выплачено","Разница"],
-    byT,[{v:"Итого"},{v:P.held},{v:P.accrued,t:fmtMoney(P.accrued)},
-      {v:P.paid,t:fmtMoney(P.paid)},{v:P.accrued-P.paid,t:fmtMoney(P.accrued-P.paid)}],
-    "По_педагогам_"+from+"_"+to));
+  return{ym:ym,blocks:blocks,total:T,debts:debts,debtTotal:D,teachers:tea,tTotal:P,
+    profit:T.charge-P.accrued};
+}
+
+/* ---------- выгрузка в Excel ---------- */
+var XLSX_URLS=["https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js",
+  "https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"];
+function withXlsx(cb,i){
+  if(window.XLSX)return cb();
+  i=i||0;
+  var list=window.XLSX_URL?[window.XLSX_URL]:XLSX_URLS;
+  if(i>=list.length)return toast("Не удалось подготовить файл Excel — проверьте интернет");
+  if(!i)toast("Готовлю файл…");
+  var s=document.createElement("script");
+  s.src=list[i];
+  s.onload=function(){window.XLSX?cb():withXlsx(cb,i+1);};
+  s.onerror=function(){withXlsx(cb,i+1);};
+  document.head.appendChild(s);
+}
+var XS={
+  title:{font:{bold:true,sz:14}},
+  head:{font:{bold:true,color:{rgb:"FFFFFF"}},fill:{fgColor:{rgb:"1B7F5C"}},
+    alignment:{vertical:"center",wrapText:true},
+    border:{bottom:{style:"thin",color:{rgb:"BBBBBB"}}}},
+  grp:{font:{bold:true},fill:{fgColor:{rgb:"EDF4F1"}}},
+  grpMoney:{font:{bold:true},fill:{fgColor:{rgb:"EDF4F1"}},numFmt:"# ##0 ₽"},
+  grpNum:{font:{bold:true},fill:{fgColor:{rgb:"EDF4F1"}}},
+  tot:{font:{bold:true},border:{top:{style:"thin",color:{rgb:"888888"}}}},
+  totMoney:{font:{bold:true},numFmt:"# ##0 ₽",border:{top:{style:"thin",color:{rgb:"888888"}}}},
+  txt:{},
+  money:{numFmt:"# ##0 ₽"},
+  debt:{numFmt:"# ##0 ₽",font:{color:{rgb:"B23B3B"},bold:true}},
+  pct:{numFmt:'0"%"'}
+};
+function xc(v,s){return{v:v==null?"":v,t:typeof v==="number"?"n":"s",s:s||XS.txt};}
+function sheetFrom(rows,cols){
+  var ws=XLSX.utils.aoa_to_sheet(rows.map(function(r){
+    return r.map(function(c){return c&&c.v!==undefined?c.v:c;});
+  }));
+  rows.forEach(function(r,i){
+    r.forEach(function(c,j){
+      if(!c||c.s===undefined)return;
+      var ref=XLSX.utils.encode_cell({r:i,c:j});
+      if(ws[ref])ws[ref].s=c.s;
+    });
+  });
+  ws["!cols"]=cols.map(function(w){return{wch:w};});
+  ws["!rows"]=[{hpt:22},{hpt:6},{hpt:28}];
+  return ws;
+}
+function downloadReport(ym){
+  var R=monthReport(ym),name="Отчёт_"+ymLabel(ym).replace(" ","_");
+  withXlsx(function(){
+    var wb=XLSX.utils.book_new();
+
+    /* 1. оплаты по занятиям */
+    var h=["Ученик","Родитель","Занятий","Цена","Скидка, %","Подарок, ₽",
+      "Начислено","Оплачено","Долг"];
+    var a=[[xc("Оплаты за "+ymLabel(ym),XS.title)],[],h.map(function(x){return xc(x,XS.head);})];
+    R.blocks.forEach(function(b){
+      a.push([xc(b.label+" · "+b.teacher,XS.grp),xc("",XS.grp),xc(b.sum.lessons,XS.grpNum),
+        xc("",XS.grp),xc("",XS.grp),xc("",XS.grp),
+        xc(b.sum.charge,XS.grpMoney),xc(b.sum.paid,XS.grpMoney),
+        xc(b.sum.charge-b.sum.paid,XS.grpMoney)]);
+      b.rows.forEach(function(r){
+        a.push([xc(r.u.name),xc(r.u.parent||""),xc(r.les),xc(r.price,XS.money),
+          xc(r.dis||""),xc(r.gift||"",r.gift?XS.money:XS.txt),
+          xc(r.charge,XS.money),xc(r.paid,XS.money),
+          xc(r.debt,r.debt>0?XS.debt:XS.money)]);
+      });
+    });
+    a.push([xc("Итого",XS.tot),xc("",XS.tot),xc(R.total.lessons,XS.tot),xc("",XS.tot),
+      xc("",XS.tot),xc("",XS.tot),xc(R.total.charge,XS.totMoney),
+      xc(R.total.paid,XS.totMoney),xc(R.total.charge-R.total.paid,XS.totMoney)]);
+    XLSX.utils.book_append_sheet(wb,sheetFrom(a,[22,18,9,11,10,12,13,13,13]),"Оплаты");
+
+    /* 2. кто должен */
+    var h2=["Ученик","Родитель","Занятия","Педагог","Начислено","Оплачено","Долг"];
+    var d=[[xc("Кто ещё должен за "+ymLabel(ym),XS.title)],[],
+      h2.map(function(x){return xc(x,XS.head);})];
+    R.debts.forEach(function(x){
+      d.push([xc(x.u.name),xc(x.u.parent||""),xc(x.what),xc(x.who),
+        xc(x.charge,XS.money),xc(x.paid,XS.money),xc(x.debt,XS.debt)]);
+    });
+    d.push([xc("Итого",XS.tot),xc("",XS.tot),xc("",XS.tot),xc("",XS.tot),xc("",XS.tot),
+      xc("",XS.tot),xc(R.debtTotal,XS.totMoney)]);
+    XLSX.utils.book_append_sheet(wb,sheetFrom(d,[22,18,28,24,13,13,13]),"Долги");
+
+    /* 3. педагоги */
+    var h3=["Педагог","Проведено занятий","Начислено","Выплачено","Осталось выплатить"];
+    var t=[[xc("Педагоги за "+ymLabel(ym),XS.title)],[],
+      h3.map(function(x){return xc(x,XS.head);})];
+    R.teachers.forEach(function(x){
+      t.push([xc(x.name),xc(x.held),xc(x.accrued,XS.money),xc(x.paid,XS.money),
+        xc(x.debt,x.debt>0?XS.debt:XS.money)]);
+    });
+    t.push([xc("Итого",XS.tot),xc(R.tTotal.held,XS.tot),xc(R.tTotal.accrued,XS.totMoney),
+      xc(R.tTotal.paid,XS.totMoney),xc(R.tTotal.accrued-R.tTotal.paid,XS.totMoney)]);
+    t.push([]);
+    t.push([xc("Заработок школы",XS.tot),xc("",XS.tot),xc(R.profit,XS.totMoney)]);
+    XLSX.utils.book_append_sheet(wb,sheetFrom(t,[26,18,14,14,18]),"Педагоги");
+
+    XLSX.writeFile(wb,name+".xlsx");
+    toast("Отчёт скачан",true);
+  });
+}
+
+/* ---------- экран ---------- */
+function kpi(k,v){
+  return'<div class="kpi"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+"</div></div>";
+}
+function viewReports(){
+  var ym=state.ym,R=monthReport(ym);
+  var wrap=el('<div class="stack"></div>');
+
+  var head=el('<div class="card"><div class="chead"><h2>Отчёт за '+esc(ymLabel(ym))+
+    '</h2><span class="hint">Месяц переключается стрелками в шапке</span></div></div>');
+  var bar=el('<div class="btnrow" style="padding:10px 14px"></div>');
+  var dl=el('<button class="btn pri" type="button">Скачать отчёт в Excel</button>');
+  dl.onclick=function(){downloadReport(ym);};
+  bar.appendChild(dl);head.appendChild(bar);
+  head.appendChild(el('<div class="kpis" style="padding:0 14px 14px">'+
+    kpi("Начислено родителям",fmtMoney(R.total.charge))+
+    kpi("Получено",fmtMoney(R.total.paid))+
+    kpi("Долг родителей",fmtMoney(R.total.charge-R.total.paid))+
+    kpi("Начислено педагогам",fmtMoney(R.tTotal.accrued))+
+    kpi("Заработок школы",fmtMoney(R.profit))+"</div>"));
+  wrap.appendChild(head);
+
+  /* оплаты по занятиям */
+  var c1=el('<div class="card"><div class="chead"><h2>Оплаты по занятиям</h2>'+
+    '<span class="hint">Оплата ученика разносится по его занятиям пропорционально начислению</span>'+
+    "</div></div>");
+  var sc=el('<div class="tscroll"></div>');
+  var tbl=el('<table><thead><tr><th>Ученик</th><th>Родитель</th>'+
+    '<th class="r">Занятий</th><th class="r">Цена</th><th class="r">Скидка, %</th>'+
+    '<th class="r">Подарок, ₽</th><th class="r">Начислено</th><th class="r">Оплачено</th>'+
+    '<th class="r">Долг</th></tr></thead><tbody></tbody></table>');
+  var tb=tbl.querySelector("tbody");
+  R.blocks.forEach(function(b){
+    tb.appendChild(el('<tr class="grp"><td colspan="2"><b>'+esc(b.label)+
+      '</b> <span class="sub">'+esc(b.teacher)+'</span></td>'+
+      '<td class="r"><b>'+fmtNum(b.sum.lessons)+"</b></td><td colspan=\"3\"></td>"+
+      '<td class="r"><b>'+esc(fmtMoney(b.sum.charge))+"</b></td>"+
+      '<td class="r"><b>'+esc(fmtMoney(b.sum.paid))+"</b></td>"+
+      '<td class="r"><b>'+esc(fmtMoney(b.sum.charge-b.sum.paid))+"</b></td></tr>"));
+    b.rows.forEach(function(r){
+      tb.appendChild(el("<tr><td>"+esc(r.u.name)+'</td><td class="sub">'+esc(r.u.parent||"")+
+        '</td><td class="r">'+(r.billed?fmtNum(r.les):'<span class="sub">не начислено</span>')+
+        '</td><td class="r">'+esc(fmtMoney(r.price))+
+        '</td><td class="r">'+(r.dis?fmtNum(r.dis)+" %":"—")+
+        '</td><td class="r">'+(r.gift?esc(fmtMoney(r.gift)):"—")+
+        '</td><td class="r">'+esc(fmtMoney(r.charge))+
+        '</td><td class="r">'+esc(fmtMoney(r.paid))+
+        '</td><td class="r nowrap">'+(r.debt>0?'<span class="pill warn">'+esc(fmtMoney(r.debt))+"</span>":
+          r.debt<0?'<span class="pill ok">переплата '+esc(fmtMoney(-r.debt))+"</span>":
+          '<span class="pill ok">оплачено</span>')+"</td></tr>"));
+    });
+  });
+  if(!R.blocks.length)tb.appendChild(el('<tr><td colspan="9" class="sub">В этом месяце занятий нет.</td></tr>'));
+  else tb.appendChild(el('<tr class="tot"><td colspan="2">Итого</td><td class="r">'+
+    fmtNum(R.total.lessons)+'</td><td colspan="3"></td><td class="r">'+esc(fmtMoney(R.total.charge))+
+    '</td><td class="r">'+esc(fmtMoney(R.total.paid))+'</td><td class="r">'+
+    esc(fmtMoney(R.total.charge-R.total.paid))+"</td></tr>"));
+  sc.appendChild(tbl);c1.appendChild(sc);wrap.appendChild(c1);
+
+  /* кто должен */
+  var c2=el('<div class="card"><div class="chead"><h2>Кто ещё должен</h2>'+
+    '<span class="hint">За '+esc(ymLabel(ym))+": начислено больше, чем поступило</span></div></div>");
+  var sc2=el('<div class="tscroll"></div>');
+  var t2=el('<table><thead><tr><th>Ученик</th><th>Родитель</th><th>Занятия</th>'+
+    '<th>Педагог</th><th class="r">Начислено</th><th class="r">Оплачено</th>'+
+    '<th class="r">Долг</th></tr></thead><tbody></tbody></table>');
+  var tb2=t2.querySelector("tbody");
+  R.debts.forEach(function(x){
+    tb2.appendChild(el("<tr><td>"+esc(x.u.name)+'</td><td class="sub">'+esc(x.u.parent||"")+
+      '</td><td class="sub">'+esc(x.what)+'</td><td class="sub">'+esc(x.who)+
+      '</td><td class="r">'+esc(fmtMoney(x.charge))+'</td><td class="r">'+esc(fmtMoney(x.paid))+
+      '</td><td class="r"><span class="pill warn">'+esc(fmtMoney(x.debt))+"</span></td></tr>"));
+  });
+  if(!R.debts.length)tb2.appendChild(el('<tr><td colspan="7" class="sub">Долгов за этот месяц нет.</td></tr>'));
+  else tb2.appendChild(el('<tr class="tot"><td colspan="6">Итого</td><td class="r">'+
+    esc(fmtMoney(R.debtTotal))+"</td></tr>"));
+  sc2.appendChild(t2);c2.appendChild(sc2);wrap.appendChild(c2);
+
+  /* педагоги */
+  var c3=el('<div class="card"><div class="chead"><h2>Педагоги</h2>'+
+    '<span class="hint">Начислено за проведённые занятия по ставке педагога</span></div></div>');
+  var sc3=el('<div class="tscroll"></div>');
+  var t3=el('<table><thead><tr><th>Педагог</th><th class="r">Проведено занятий</th>'+
+    '<th class="r">Начислено</th><th class="r">Выплачено</th>'+
+    '<th class="r">Осталось выплатить</th></tr></thead><tbody></tbody></table>');
+  var tb3=t3.querySelector("tbody");
+  R.teachers.forEach(function(x){
+    tb3.appendChild(el("<tr><td>"+esc(x.name)+'</td><td class="r">'+fmtNum(x.held)+
+      '</td><td class="r">'+esc(fmtMoney(x.accrued))+'</td><td class="r">'+esc(fmtMoney(x.paid))+
+      '</td><td class="r nowrap">'+(x.debt>0?'<span class="pill warn">'+esc(fmtMoney(x.debt))+"</span>":
+        '<span class="pill ok">выплачено</span>')+"</td></tr>"));
+  });
+  if(!R.teachers.length)tb3.appendChild(el('<tr><td colspan="5" class="sub">Проведённых занятий в этом месяце нет.</td></tr>'));
+  else tb3.appendChild(el('<tr class="tot"><td>Итого</td><td class="r">'+fmtNum(R.tTotal.held)+
+    '</td><td class="r">'+esc(fmtMoney(R.tTotal.accrued))+'</td><td class="r">'+
+    esc(fmtMoney(R.tTotal.paid))+'</td><td class="r">'+
+    esc(fmtMoney(R.tTotal.accrued-R.tTotal.paid))+"</td></tr>"));
+  sc3.appendChild(t3);c3.appendChild(sc3);wrap.appendChild(c3);
   return wrap;
 }
 /* ---------- Supabase ---------- */
