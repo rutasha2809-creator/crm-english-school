@@ -1385,8 +1385,21 @@ function billCard(){
     tr.appendChild(el('<td class="sub">'+esc(rows.map(function(r){return luLabel(u,r.lu);}).join(" + ")||"занятий нет")+"</td>"));
     tr.appendChild(el('<td class="r sub">'+fmtNum(rows.reduce(function(a,r){return a+r.cin;},0))+"</td>"));
     tr.appendChild(el('<td class="r sub">'+fmtNum(plan)+"</td>"));
-    tr.appendChild(el('<td class="r"><b>'+fmtNum(rows.reduce(function(a,r){return a+(r.b?+r.b.lessons||0:r.toBill);},0))+"</b></td>"));
-    tr.appendChild(el('<td colspan="3"></td>'));
+    /* Один вид занятий — правим прямо в строке ученика, раскрывать нечего. */
+    var one=rows.length===1?rows[0]:null;
+    if(one&&one.b){
+      tr.appendChild(numCell("b-les-"+u.id+"-"+one.kind,one.b.lessons,66,"1",
+        function(v){patchBill(u,one.lu,{lessons:v});}));
+      tr.appendChild(numCell("b-pr-"+u.id+"-"+one.kind,one.b.price,86,"50",
+        function(v){patchBill(u,one.lu,{price:v});}));
+      tr.appendChild(numCell("b-dis-"+u.id+"-"+one.kind,one.b.discount||0,66,"1",
+        function(v){patchBill(u,one.lu,{discount:v});}));
+      tr.appendChild(numCell("b-gift-"+u.id+"-"+one.kind,one.b.gift||0,86,"100",
+        function(v){patchBill(u,one.lu,{gift:v});}));
+    }else{
+      tr.appendChild(el('<td class="r"><b>'+fmtNum(rows.reduce(function(a,r){return a+(r.b?+r.b.lessons||0:r.toBill);},0))+"</b></td>"));
+      tr.appendChild(el('<td colspan="3"'+(one?' class="sub">начисление ещё не сделано':">")+"</td>"));
+    }
     tr.appendChild(el('<td class="r"><b>'+esc(fmtMoney(charge))+"</b></td>"));
     tr.appendChild(numCell("b-paid-"+u.id,paid,96,"100",function(v){setPaid(u,v);}));
     tr.appendChild(el('<td class="r nowrap">'+
@@ -1394,7 +1407,14 @@ function billCard(){
        debt<0?'<span class="pill ok">переплата '+esc(fmtMoney(-debt))+"</span>":
        '<span class="pill ok">оплачено</span>')+"</td>"));
     tr.appendChild(el('<td class="r sub">'+fmtNum(outSum)+"</td>"));
-    tr.appendChild(el("<td></td>"));
+    var tdAct=document.createElement("td");
+    if(one&&!one.b){
+      var mk1=el('<button class="btn sm" type="button">Начислить</button>');
+      mk1.onclick=function(){makeBill(u,one.lu,one.toBill);};
+      if(!one.toBill)mk1.disabled=true;
+      tdAct.appendChild(mk1);
+    }
+    tr.appendChild(tdAct);
     tb.appendChild(tr);
     if(!open)return;
     if(!rows.length)tb.appendChild(el('<tr><td colspan="13" class="sub" style="padding-left:28px">'+
