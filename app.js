@@ -8,7 +8,7 @@ var STATUS_ORDER_FREE=["none","done","pc"];
 var MARK={plan:"",done:"✓",pc:"₽",c:"×",off:"–"};
 var CLS={plan:"c-plan",done:"c-done",pc:"c-pc",c:"c-c",off:"c-off"};
 
-var state={tab:"month",ref:"teachers",rep:{from:null,to:null},ym:null,
+var state={tab:"month",ref:"teachers",sale:null,rep:{from:null,to:null},ym:null,
   teachers:{},units:{},months:{},subs:{},payments:{},settings:{},open:{},
   ready:false,err:null};
 
@@ -991,17 +991,68 @@ function packageOptions(){
     }));
 }
 
+/* ---------- счёт на следующий месяц ---------- */
+/* Родители платят за месяц вперёд: занятий по плану минус то, что осталось
+   неиспользованным, — столько занятий и нужно продать. */
+function billYm(){return ymShift(state.ym,1);}
+function billRow(u){
+  var ym=billYm(),plan=planDays(lessonUnit(u),ym).length;
+  var left=lessonsLeft(u),toSell=Math.max(0,plan-Math.max(0,left));
+  return{u:u,plan:plan,left:left,toSell:toSell};
+}
+function billCard(){
+  var ym=billYm();
+  var c=el('<div class="card"><div class="chead"><h2>Счёт на '+esc(ymLabel(ym))+'</h2>'+
+    '<span class="hint">Занятий по плану минус неиспользованный остаток — столько занятий осталось продать</span>'+
+    '</div><div class="tscroll"></div></div>');
+  var tbl=el('<table><thead><tr><th>Ученик</th><th>Группа</th>'+
+    '<th class="r">По плану</th><th class="r">Остаток</th><th class="r">К оплате занятий</th><th></th>'+
+    "</tr></thead><tbody></tbody></table>");
+  var tb=tbl.querySelector("tbody"),rows=[],T={plan:0,sell:0};
+  students().forEach(function(u){
+    var r=billRow(u);
+    if(!r.plan&&r.left<=0)return;
+    rows.push(r);T.plan+=r.plan;T.sell+=r.toSell;
+  });
+  rows.forEach(function(r){
+    var g=groupOf(r.u);
+    var tr=el("<tr><td>"+esc(r.u.name)+'</td><td class="sub">'+(g?esc(g.name):"—")+
+      '</td><td class="r">'+fmtNum(r.plan)+'</td><td class="r">'+
+      (r.left>0?'<span class="pill ok">'+fmtNum(r.left)+"</span>":
+       r.left<0?'<span class="pill bad">'+fmtNum(r.left)+"</span>":
+       '<span class="sub">0</span>')+
+      '</td><td class="r"><b>'+fmtNum(r.toSell)+"</b></td></tr>");
+    var td=document.createElement("td");
+    var b=el('<button class="btn sm" type="button">Выставить</button>');
+    b.onclick=function(){
+      state.sale={studentId:r.u.id,lessons:r.toSell};
+      state.open=state.open||{};state.open["sale:new"]=1;
+      try{localStorage.setItem("oe.open",JSON.stringify(state.open));}catch(e){}
+      render();
+    };
+    if(!r.toSell)b.disabled=true;
+    td.appendChild(b);tr.appendChild(td);tb.appendChild(tr);
+  });
+  if(!rows.length)tb.appendChild(el('<tr><td colspan="6" class="sub">Не задано ни одного дня занятий, поэтому план на '+
+    esc(ymLabel(ym))+" пустой.</td></tr>"));
+  else tb.appendChild(el('<tr class="tot"><td colspan="2">Итого</td><td class="r">'+fmtNum(T.plan)+
+    '</td><td></td><td class="r">'+fmtNum(T.sell)+"</td><td></td></tr>"));
+  c.querySelector(".tscroll").appendChild(tbl);
+  return c;
+}
+
 /* ---------- продажа абонемента ---------- */
 function saleForm(){
+  var draft=state.sale||{};
   var box=el('<div class="refrow"></div>');
   var f=el('<div class="fields"></div>');
   var whoSel=sel("sale-who",[["one","Одному ученику"],["group","Всей группе"]],"one");
-  var stu=sel("sale-student",studentOptions(),"");
+  var stu=sel("sale-student",studentOptions(),draft.studentId||"");
   var grp=sel("sale-group",[["","— выбрать группу —"]].concat(groups().map(function(g){
     return[g.id,g.name+" · "+groupMembers(g).length+" чел."];})),"");
   var pkg=sel("sale-pkg",packageOptions(),"");
   var date=inp("sale-date","date",today());
-  var lessons=inp("sale-lessons","number","",80);
+  var lessons=inp("sale-lessons","number",draft.lessons||"",80);
   var total=inp("sale-total","number","",110,"50");
 
   var whoLab=labeled("Кому",whoSel);
@@ -1012,12 +1063,20 @@ function saleForm(){
     grpLab.hidden=whoSel.value!=="group";
   }
   whoSel.onchange=syncWho;
+  /* стоимость всегда считается от количества занятий и цены выбранного абонемента */
+  function recalc(){
+    var p=packageOf(pkg.value);
+    if(!p)return;
+    var price=tariffPrice(p.tariff),n=+lessons.value||0,gross=n*price;
+    total.value=Math.round(gross-gross*(+p.discount||0)/100);
+  }
   pkg.onchange=function(){
     var p=packageOf(pkg.value);
     if(!p)return;
-    lessons.value=+p.lessons||0;
-    total.value=packageTotal(p);
+    if(!(+lessons.value))lessons.value=+p.lessons||0;
+    recalc();
   };
+  lessons.onchange=recalc;
   f.appendChild(whoLab);f.appendChild(stuLab);f.appendChild(grpLab);
   f.appendChild(labeled("Абонемент",pkg));
   f.appendChild(labeled("Дата продажи",date));
@@ -1025,6 +1084,12 @@ function saleForm(){
   f.appendChild(labeled("Стоимость",total));
   box.appendChild(f);
   syncWho();
+  if(draft.studentId){
+    var du=state.units[draft.studentId]||{};
+    box.appendChild(el('<p class="sub" style="margin:0">Подставлено из счёта на '+
+      esc(ymLabel(billYm()))+": "+esc(du.name||"")+", "+fmtNum(draft.lessons)+
+      " зан. Выберите абонемент — стоимость пересчитается по этому количеству.</p>"));
+  }
 
   var row=el('<div class="btnrow" style="margin-top:4px"></div>');
   var btn=el('<button class="btn pri" type="button">Продать абонемент</button>');
@@ -1044,6 +1109,7 @@ function saleForm(){
     var n=+lessons.value||0,sum=+total.value||0;
     if(!n){toast("Укажите количество занятий");return;}
     var p=packageOf(pkg.value)||{};
+    state.sale=null;
     targets.forEach(function(u2){
       saveSub({id:newId("s"),studentId:u2.id,soldOn:date.value||today(),
         pkg:pkg.value,lessons:n,price:tariffPrice(p.tariff),
@@ -1211,6 +1277,7 @@ function teacherDebtCard(){
 
 function viewDocs(){
   var wrap=el('<div class="stack"></div>');
+  wrap.appendChild(billCard());
   wrap.appendChild(salesCard());
   wrap.appendChild(paymentsCard());
   var d=debtsCard();if(d)wrap.appendChild(d);
