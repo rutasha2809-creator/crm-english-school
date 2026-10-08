@@ -163,10 +163,12 @@ function monthsWithLessons(){
    для индивидуального занятия отметка одна — самого занятия. */
 function sure(msg){try{return window.confirm(msg);}catch(e){return false;}}
 function curYm(){var d=new Date();return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2);}
+/* С какого месяца ученик занимается на этом занятии. Пусто — ограничения нет. */
+function startYm(u,lu){return(u&&u.joined&&lu&&u.joined[lu.id])||"";}
+function beforeStart(u,lu,ym){var s=startYm(u,lu);return !!s&&ym<s;}
 function luStatus(u,lu,ym,day){
+  if(beforeStart(u,lu,ym))return "none";
   if(lu.kind!=="group")return dayStatus(lu,ym,day,mdoc(lu,ym));
-  var jm=u.joined&&u.joined[lu.id];
-  if(jm&&ym<jm)return "none";
   var own=(mdoc(u,ym).days||{})[String(day)];
   var gst=dayStatus(lu,ym,day,mdoc(lu,ym));
   if(gst==="none")return "none";
@@ -224,10 +226,10 @@ function allMonths(){
   for(var s in state.subs){if(state.subs[s].ym)set[state.subs[s].ym]=1;}
   return Object.keys(set).sort();
 }
-function billLessons(u,ym,lu){var b=billOf(u,ym,lu);return b?+b.lessons||0:0;}
+function billLessons(u,ym,lu){if(beforeStart(u,lu,ym))return 0;var b=billOf(u,ym,lu);return b?+b.lessons||0:0;}
 /* Ручная поправка остатка на начало месяца — по занятию. */
 function adjId(u,ym,lu){return "adj-"+ym+"-"+u.id+"-"+(lu?lu.id:"x");}
-function manualCarry(u,ym,lu){var a=state.subs[adjId(u,ym,lu)];return a?+a.lessons||0:0;}
+function manualCarry(u,ym,lu){if(beforeStart(u,lu,ym))return 0;var a=state.subs[adjId(u,ym,lu)];return a?+a.lessons||0:0;}
 /* Перешло с прошлых месяцев по этому занятию. */
 function carryIn(u,ym,lu){
   var total=0;
@@ -242,11 +244,9 @@ function carryOut(u,ym,lu){
 }
 /* Сумма начисления за месяц. */
 function chargeOf(u,ym,lu){
-  if(lu){var b=billOf(u,ym,lu);return b?billTotal(b):0;}
+  if(lu){if(beforeStart(u,lu,ym))return 0;var b=billOf(u,ym,lu);return b?billTotal(b):0;}
   var sum=0;
-  lessonUnitsOfStudent(u).forEach(function(x){
-    var b=billOf(u,ym,x);if(b)sum+=billTotal(b);
-  });
+  lessonUnitsOfStudent(u).forEach(function(x){sum+=chargeOf(u,ym,x);});
   return sum;
 }
 /* Деньги, пришедшие с прошлых месяцев: переплата идёт вперёд, недоплата тянется.
@@ -283,16 +283,23 @@ function isCarry(s){return s.note==="carry"||s.total===0&&s.pkg==="Перено�
 function subsOf(sid){return subsList().filter(function(s){return s.studentId===sid;});}
 /* Сколько занятий куплено ученику за всё время. */
 function lessonsBought(u){
-  var bought=0;
-  subsOf(u.id).forEach(function(s){bought+=+s.lessons||0;});
+  var bought=0,ms=allMonths();
+  lessonUnitsOfStudent(u).forEach(function(lu){
+    ms.forEach(function(m){bought+=billLessons(u,m,lu)+manualCarry(u,m,lu);});
+  });
   return bought;
 }
 /* Остаток занятий: куплено минус проведено. */
 function lessonsLeft(u){return lessonsBought(u)-heldOf(u);}
 /* Долг родителя: продано на сумму минус поступило. */
 function debtOf(u){
-  var billed=0,paid=0;
-  subsOf(u.id).forEach(function(s){billed+=+s.total||0;});
+  var billed=0,paid=0,ms=allMonths();
+  lessonUnitsOfStudent(u).forEach(function(lu){
+    ms.forEach(function(m){
+      if(beforeStart(u,lu,m))return;
+      var b=billOf(u,m,lu);if(b)billed+=+b.total||0;
+    });
+  });
   paymentsList().forEach(function(p){
     if(p.direction==="in"&&p.studentId===u.id)paid+=+p.amount||0;
   });
@@ -1003,6 +1010,17 @@ function leaveGroup(g,uid){
   saveUnit(uid,{groupIds:ids,groupId:ids[0]||""});
 }
 
+/* С какого месяца ученик занимается: всё, что раньше, в расчёты не идёт. */
+function startField(u,lu){
+  var f=el('<div class="fields"></div>');
+  f.appendChild(field("Занимается с (месяц)","ls-"+u.id+"-"+lu.id,startYm(u,lu),"month",
+    function(v){
+      var jn=Object.assign({},u.joined||{});
+      if(v)jn[lu.id]=v;else delete jn[lu.id];
+      saveUnit(u.id,{joined:jn});
+    }));
+  return f;
+}
 function lessonLine(u,lu){
   var box=el('<div class="lesson"></div>');
   var head=el('<div class="lhead"><b>'+esc(luLabel(u,lu))+"</b></div>");
@@ -1014,6 +1032,7 @@ function lessonLine(u,lu){
     else{saveUnit(lu.id,{active:false});toast("Индивидуальные занятия удалены");}
   };
   head.appendChild(rm);box.appendChild(head);
+  box.appendChild(startField(u,lu));
   if(lu.kind==="group"){
     var t=state.teachers[lu.teacherId]||{};
     box.appendChild(el('<p class="sub" style="margin:0">Педагог: '+esc(t.name||"не выбран")+
@@ -1048,7 +1067,10 @@ function addLesson(u,value){
       rateName:"",tariffName:"",weekdays:[],active:true,
       order:900+indUnits(u.id).length,channel:"",memberIds:[],groupId:""};
     state.units[id]=Object.assign({id:id},body);
+    var jn0=Object.assign({},u.joined||{});jn0[id]=curYm();
+    state.units[u.id]=Object.assign({},u,{joined:jn0});
     render();
+    saveUnit(u.id,{joined:jn0});
     track(API.saveUnit(id,body)).catch(saveFailed);
     toast("Индивидуальные занятия добавлены");
     return;
