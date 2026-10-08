@@ -142,12 +142,35 @@ function monthsWithLessons(){
   }
   return Object.keys(set).sort();
 }
-/* Сколько занятий проведено у ученика за всё время или за месяц. */
+/* Посещение ученика в конкретный день.
+   По умолчанию ученик идёт за своей учебной единицей; отметка в его строке
+   журнала — исключение: не пришёл или пропустил с оплатой. */
+function studentStatus(u,ym,day){
+  var own=(mdoc(u,ym).days||{})[String(day)];
+  if(own)return own;
+  var g=groupOf(u);
+  return g?dayStatus(g,ym,day,mdoc(g,ym)):"none";
+}
+function isOwnMark(u,ym,day){return !!(mdoc(u,ym).days||{})[String(day)];}
+/* Занятия ученика за месяц: израсходованными считаются проведённые
+   и пропуски с оплатой. */
+function studentStats(u,ym){
+  ym=ym||state.ym;
+  var n=daysIn(ym),plan=0,done=0,pc=0,canc=0;
+  for(var d=1;d<=n;d++){
+    var s=studentStatus(u,ym,d);
+    if(s==="plan")plan++;
+    else if(s==="done"){done++;plan++;}
+    else if(s==="pc"){pc++;plan++;}
+    else if(s==="c"){canc++;plan++;}
+  }
+  return{plan:plan,done:done,pc:pc,canc:canc,held:done+pc};
+}
+/* Сколько занятий израсходовано учеником за всё время или за месяц. */
 function heldOf(u,ym){
-  var lu=lessonUnit(u);
-  if(ym)return unitStats(lu,ym).held;
+  if(ym)return studentStats(u,ym).held;
   var total=0;
-  monthsWithLessons().forEach(function(m){total+=unitStats(lu,m).held;});
+  monthsWithLessons().forEach(function(m){total+=studentStats(u,m).held;});
   return total;
 }
 
@@ -455,8 +478,7 @@ function viewJournal(){
     '<span><i class="c-plan"></i>план</span>'+
     '<span><i class="c-done">✓</i>проведено</span>'+
     '<span><i class="c-pc">₽</i>отмена с оплатой</span>'+
-    '<span><i class="c-c">×</i>отмена без оплаты</span>'+
-    '<span><i class="c-off">–</i>снято с плана</span>'+
+    '<span><i class="c-c">×</i>не было, без оплаты</span>'+
     "</div>"));
   var btns=el('<div class="btnrow"></div>');
   var confirmBtn=el('<button class="btn pri" type="button">Подтвердить план по сегодня</button>');
@@ -480,7 +502,8 @@ function viewJournal(){
     for(var i=0;i<n+2;i++)grid.appendChild(el('<div class="spacer"></div>'));
     lus.forEach(function(lu){
       var md=mdoc(lu),s=unitStats(lu);
-      var label=lu.kind==="group"?lu.name+" ("+groupMembers(lu).length+")":lu.name;
+      var members=lu.kind==="group"?groupMembers(lu):[];
+      var label=lu.kind==="group"?lu.name+" ("+members.length+")":lu.name;
       grid.appendChild(el('<div class="name" title="'+esc(label)+'">'+esc(label)+"</div>"));
       for(var d2=1;d2<=n;d2++){
         var st=dayStatus(lu,ym,d2,md);
@@ -495,6 +518,28 @@ function viewJournal(){
       }
       grid.appendChild(el('<div class="sum">'+fmtNum(s.plan)+"</div>"));
       grid.appendChild(el('<div class="sum" style="color:var(--ok)">'+fmtNum(s.held)+"</div>"));
+      /* посещаемость каждого ученика группы: по умолчанию как у группы */
+      members.forEach(function(m){
+        var ms=studentStats(m,ym);
+        grid.appendChild(el('<div class="name sub" title="'+esc(m.name)+'" style="padding-left:16px">'+
+          esc(m.name)+"</div>"));
+        for(var d3=1;d3<=n;d3++){
+          var gst=dayStatus(lu,ym,d3,md);
+          var st2=studentStatus(m,ym,d3),own=isOwnMark(m,ym,d3);
+          var mb=document.createElement("button");
+          mb.type="button";
+          mb.className="cell"+(st2!=="none"?" "+CLS[st2]:"")+(own?"":" inherit");
+          mb.textContent=MARK[st2]||"";
+          mb.title=m.name+", "+d3+" "+MONTHS_IN[ymParts(ym).m-1]+
+            (own?"":" — как у группы");
+          mb.disabled=gst==="none";
+          mb.setAttribute("data-m",m.id);mb.setAttribute("data-g",lu.id);mb.setAttribute("data-d",d3);
+          mb.onclick=onMemberCell;
+          grid.appendChild(mb);
+        }
+        grid.appendChild(el('<div class="sum sub">'+fmtNum(ms.plan)+"</div>"));
+        grid.appendChild(el('<div class="sum sub" style="color:var(--ok)">'+fmtNum(ms.held)+"</div>"));
+      });
     });
   });
   scroll.appendChild(grid);card.appendChild(scroll);wrap.appendChild(card);
@@ -515,6 +560,15 @@ function onCell(ev){
   var patch={};
   patch[String(d)]=next==="none"?null:next;
   saveMonth(lu,{days:patch});
+}
+/* Клик по строке ученика: как у группы → не пришёл → пропуск с оплатой. */
+function onMemberCell(ev){
+  var mid=ev.currentTarget.getAttribute("data-m"),d=+ev.currentTarget.getAttribute("data-d");
+  var m=state.units[mid];if(!m)return;
+  var own=(mdoc(m,state.ym).days||{})[String(d)];
+  var next=own==="c"?"pc":own==="pc"?null:"c";
+  var patch={};patch[String(d)]=next;
+  saveMonth(m,{days:patch});
 }
 function confirmPast(){
   var ym=state.ym,now=new Date(),n=daysIn(ym);
