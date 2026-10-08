@@ -127,7 +127,7 @@ function unitStats(lu,ym){
     if(s==="plan")plan++;
     else if(s==="done"){done++;plan++;}
     else if(s==="pc"){pc++;plan++;}
-    else if(s==="c")canc++;
+    else if(s==="c"){canc++;plan++;}
   }
   var held=done+pc,rate=rateOf(lu);
   return{plan:plan,done:done,pc:pc,canc:canc,held:held,paidLessons:held,
