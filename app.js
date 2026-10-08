@@ -161,8 +161,11 @@ function monthsWithLessons(){
 /* Статус дня для ученика в конкретном занятии.
    Для группы отметка ученика перекрывает отметку группы (посещаемость),
    для индивидуального занятия отметка одна — самого занятия. */
+function curYm(){var d=new Date();return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2);}
 function luStatus(u,lu,ym,day){
   if(lu.kind!=="group")return dayStatus(lu,ym,day,mdoc(lu,ym));
+  var jm=u.joined&&u.joined[lu.id];
+  if(jm&&ym<jm)return "none";
   var own=(mdoc(u,ym).days||{})[String(day)];
   var gst=dayStatus(lu,ym,day,mdoc(lu,ym));
   if(gst==="none")return "none";
@@ -986,8 +989,11 @@ function readField(label,text){
 function joinGroup(g,uid){
   var u=state.units[uid];if(!u||!g)return;
   var ids=groupIdsOf(u).slice();
-  if(ids.indexOf(g.id)<0)ids.push(g.id);
-  saveUnit(uid,{groupIds:ids,groupId:ids[0]||""});
+  var isNew=ids.indexOf(g.id)<0;
+  if(isNew)ids.push(g.id);
+  var jn=Object.assign({},u.joined||{});
+    if(isNew)jn[g.id]=curYm();
+  saveUnit(uid,{groupIds:ids,groupId:ids[0]||"",joined:jn});
   toast(u.name+" в группе «"+g.name+"»");
 }
 function leaveGroup(g,uid){
@@ -1702,13 +1708,13 @@ function teacherToRow(t){
 function unitFromRow(r){
   return{id:r.id,kind:r.kind||"solo",name:r.name||"",parent:r.parent||"",teacherId:r.teacher_id||"",
     weekdays:(r.weekdays||[]).map(Number),memberIds:r.member_ids||[],groupId:r.group_id||"",
-    groupIds:r.group_ids||(r.group_id?[r.group_id]:[]),
+    joined:r.joined||{},groupIds:r.group_ids||(r.group_id?[r.group_id]:[]),
     rateName:r.rate_name||"",tariffName:r.tariff_name||"",channel:r.channel||"",active:r.active!==false,order:r.order_no};
 }
 function unitToRow(u){
   return{id:u.id,kind:u.kind||"solo",name:u.name||"",parent:u.parent||"",teacher_id:u.teacherId||"",
     weekdays:(u.weekdays||[]).map(Number),member_ids:u.memberIds||[],group_id:u.groupId||"",
-    group_ids:u.groupIds||[],
+    group_ids:u.groupIds||[],joined:u.joined||{},
     rate_name:u.rateName||"",tariff_name:u.tariffName||"",channel:u.channel||"",active:u.active!==false,
     order_no:u.order==null?900:u.order,format:u.kind==="group"?"group":"individual"};
 }
@@ -1762,7 +1768,7 @@ var API={
   saveUnit:function(id,u,patch){
     var row=unitToRow(Object.assign({},u,{id:id}));row.owner=session.user.id;
     /* связь с группами пишем только когда её меняли: устаревшая вкладка не сотрёт чужое */
-    if(patch&&!("groupIds" in patch)&&!("groupId" in patch)){delete row.group_ids;delete row.group_id;}
+    if(patch&&!("groupIds" in patch)&&!("groupId" in patch)){delete row.group_ids;delete row.group_id;delete row.joined;}
     return sb.from("oe_units").upsert(row,{onConflict:"owner,id"}).then(oops);
   },
   saveTeacher:function(id,t){
