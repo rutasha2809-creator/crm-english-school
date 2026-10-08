@@ -48,7 +48,7 @@ h1,h2,h3,th,.num,button,select,input{font-family:var(--font-ui)}
 .num,td,th{font-variant-numeric:tabular-nums}
 
 header.app{position:sticky;top:env(safe-area-inset-top,0px);z-index:40;background:var(--surface);border-bottom:1px solid var(--line)}
-.hwrap{max-width:1280px;margin:0 auto;padding:10px 16px 0}
+.hwrap{max-width:none;margin:0;padding:10px 16px 0}
 .hrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 h1{margin:0;font-size:17px;font-weight:700;letter-spacing:-.2px;flex:1 1 auto;min-width:0}
 h1 span{color:var(--ink-3);font-weight:500}
@@ -62,7 +62,7 @@ nav.tabs button{border:0;border-bottom:2px solid transparent;background:transpar
 nav.tabs button[aria-current="true"]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 nav.tabs button:hover{color:var(--ink)}
 
-main{max-width:1280px;margin:0 auto;padding-block:18px 60px;padding-left:16px;padding-right:16px}
+main{max-width:none;margin:0;padding-block:18px 60px;padding-left:16px;padding-right:16px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
 .card>.chead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line)}
 .card>.chead h2{margin:0;font-size:14px;font-weight:600}
