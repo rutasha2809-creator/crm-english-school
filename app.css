@@ -232,3 +232,6 @@ h1 span{font-size:12.5px}
 .rowtog{all:unset;cursor:pointer;display:flex;align-items:center;gap:6px;font:inherit;color:var(--ink)}
 .rowtog[aria-expanded="true"] .accarrow{transform:rotate(90deg)}
 .calday.busy{background:var(--surface-2);color:var(--ink-3);border-style:dashed;cursor:default}
+.lessons{display:grid;gap:10px;margin-top:4px}
+.lesson{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;background:var(--surface-2)}
+.lhead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
