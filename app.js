@@ -280,7 +280,7 @@ var TABS=[
   {id:"month",label:"Месяц"},
   {id:"journal",label:"Журнал занятий"},
   {id:"schedule",label:"Расписание по дням"},
-  {id:"docs",label:"Продажи и деньги"},
+  {id:"docs",label:"Начисления и оплаты"},
   {id:"reports",label:"Отчёты"},
   {id:"ref",label:"Справочники"}
 ];
@@ -320,14 +320,14 @@ function viewMonth(){
   });
 
   var kpis=el('<div class="kpis"></div>');
-  kpis.appendChild(kpiCard("Продано абонементов",fmtMoney(sold),
-    soldCount?fmtNum(soldCount)+" шт. · "+fmtNum(soldLessons)+" зан.":"продаж в этом месяце нет"));
+  kpis.appendChild(kpiCard("Начислено родителям",fmtMoney(sold),
+    soldCount?fmtNum(soldCount)+" начисл. · "+fmtNum(soldLessons)+" зан.":"начислений в этом месяце нет"));
   kpis.appendChild(kpiCard("Получено от родителей",fmtMoney(gotIn),
-    sold>gotIn?"из проданного ждём "+fmtMoney(sold-gotIn):"поступило всё проданное"));
+    sold>gotIn?"из начисленного ждём "+fmtMoney(sold-gotIn):"поступило всё начисленное"));
   kpis.appendChild(kpiCard("Начислено педагогам",fmtMoney(accrued),
     "за "+fmtNum(held)+" провед. · выплачено "+fmtMoney(paidOut)));
   kpis.appendChild(kpiCard("Заработок школы",fmtMoney(sold-accrued),
-    sold?Math.round((sold-accrued)/sold*100)+"% от проданного":"","accent"));
+    sold?Math.round((sold-accrued)/sold*100)+"% от начисленного":"","accent"));
   kpis.appendChild(kpiCard("Занятий проведено",fmtNum(held),"по плану "+fmtNum(plan)));
   wrap.appendChild(kpis);
 
@@ -361,7 +361,7 @@ function viewMonth(){
     sts.forEach(function(u){
       var g=groupOf(u),left=lessonsLeft(u),debt=debtOf(u);
       totDebt+=debt;totLeft+=left;
-      var leftPill=!lessonsBought(u)?'<span class="pill mute">абонемент не продан</span>':
+      var leftPill=!lessonsBought(u)?'<span class="pill mute">не начислялось</span>':
         left>0?'<span class="pill ok">'+fmtNum(left)+"</span>":
         left<0?'<span class="pill bad">перерасход '+fmtNum(-left)+"</span>":
         '<span class="pill warn">абонемент закончился</span>';
@@ -1002,10 +1002,27 @@ function billRow(u){
   var left=lessonsLeft(u),toSell=Math.max(0,plan-Math.max(0,left));
   return{u:u,plan:plan,left:left,toSell:toSell};
 }
+/* Остаток можно поправить прямо в таблице: разница сохраняется отдельной
+   строкой-корректировкой, чтобы не выдумывать историю прошлых месяцев. */
+function adjId(u){return "adj-"+u.id;}
+function setLeft(u,value){
+  var cur=lessonsLeft(u),old=state.subs[adjId(u)],had=old?+old.lessons||0:0;
+  var next=had+(value-cur);
+  saveSub({id:adjId(u),studentId:u.id,soldOn:ymShift(state.ym,-1)+"-28",
+    pkg:"Перенос с прошлого периода",lessons:next,price:0,discount:0,total:0,note:"carry"});
+}
+function leftCell(u){
+  var td=document.createElement("td");td.className="r";
+  var i=document.createElement("input");
+  i.type="number";i.step="1";i.className="amt";i.style.width="68px";
+  i.id="left-"+u.id;i.value=lessonsLeft(u);
+  i.onchange=function(){setLeft(u,+i.value||0);};
+  td.appendChild(i);return td;
+}
 function billCard(){
   var ym=billYm();
-  var c=el('<div class="card"><div class="chead"><h2>Счёт на '+esc(ymLabel(ym))+'</h2>'+
-    '<span class="hint">Занятий по плану минус неиспользованный остаток — столько занятий осталось продать</span>'+
+  var c=el('<div class="card"><div class="chead"><h2>Начисление на '+esc(ymLabel(ym))+'</h2>'+
+    '<span class="hint">Остаток можно исправить прямо в таблице — например, вписать занятия, перенесённые с прошлого месяца</span>'+
     '</div><div class="tscroll"></div></div>');
   var tbl=el('<table><thead><tr><th>Ученик</th><th>Группа</th>'+
     '<th class="r">По плану</th><th class="r">Остаток</th><th class="r">К оплате занятий</th><th></th>'+
@@ -1013,19 +1030,16 @@ function billCard(){
   var tb=tbl.querySelector("tbody"),rows=[],T={plan:0,sell:0};
   students().forEach(function(u){
     var r=billRow(u);
-    if(!r.plan&&r.left<=0)return;
     rows.push(r);T.plan+=r.plan;T.sell+=r.toSell;
   });
   rows.forEach(function(r){
     var g=groupOf(r.u);
     var tr=el("<tr><td>"+esc(r.u.name)+'</td><td class="sub">'+(g?esc(g.name):"—")+
-      '</td><td class="r">'+fmtNum(r.plan)+'</td><td class="r">'+
-      (r.left>0?'<span class="pill ok">'+fmtNum(r.left)+"</span>":
-       r.left<0?'<span class="pill bad">'+fmtNum(r.left)+"</span>":
-       '<span class="sub">0</span>')+
-      '</td><td class="r"><b>'+fmtNum(r.toSell)+"</b></td></tr>");
+      '</td><td class="r">'+fmtNum(r.plan)+"</td></tr>");
+    tr.appendChild(leftCell(r.u));
+    tr.appendChild(el('<td class="r"><b>'+fmtNum(r.toSell)+"</b></td>"));
     var td=document.createElement("td");
-    var b=el('<button class="btn sm" type="button">Выставить</button>');
+    var b=el('<button class="btn sm" type="button">Начислить</button>');
     b.onclick=function(){
       state.sale={studentId:r.u.id,lessons:r.toSell};
       state.open=state.open||{};state.open["sale:new"]=1;
@@ -1090,11 +1104,11 @@ function saleForm(){
     var du=state.units[draft.studentId]||{};
     box.appendChild(el('<p class="sub" style="margin:0">Подставлено из счёта на '+
       esc(ymLabel(billYm()))+": "+esc(du.name||"")+", "+fmtNum(draft.lessons)+
-      " зан. Выберите абонемент — стоимость пересчитается по этому количеству.</p>"));
+      " зан. Выберите абонемент — сумма пересчитается по этому количеству.</p>"));
   }
 
   var row=el('<div class="btnrow" style="margin-top:4px"></div>');
-  var btn=el('<button class="btn pri" type="button">Продать абонемент</button>');
+  var btn=el('<button class="btn pri" type="button">Начислить</button>');
   btn.onclick=function(){
     var targets=[];
     if(whoSel.value==="group"){
@@ -1117,75 +1131,20 @@ function saleForm(){
         pkg:pkg.value,lessons:n,price:tariffPrice(p.tariff),
         discount:+p.discount||0,total:sum,note:""});
     });
-    toast(targets.length>1?"Продано абонементов: "+targets.length:"Абонемент продан");
+    toast(targets.length>1?"Начислено ученикам: "+targets.length:"Начислено");
   };
   row.appendChild(btn);box.appendChild(row);
   return box;
 }
-/* ---------- перенос занятий с прошлого периода ---------- */
-/* Занятия, оплаченные до начала учёта: добавляют остаток и ничего не начисляют. */
-var CARRY_LABEL="Перенос с прошлого периода";
-function carryForm(){
-  var box=el('<div class="refrow"></div>');
-  var f=el('<div class="fields"></div>');
-  var whoSel=sel("carry-who",[["one","Одному ученику"],["group","Всей группе"]],"one");
-  var stu=sel("carry-student",studentOptions(),"");
-  var grp=sel("carry-group",[["","— выбрать группу —"]].concat(groups().map(function(g){
-    return[g.id,g.name+" · "+groupMembers(g).length+" чел."];})),"");
-  var lessons=inp("carry-lessons","number","",80);
-  var date=inp("carry-date","date",ymShift(state.ym,-1)+"-28");
-  var stuLab=labeled("Ученик",stu),grpLab=labeled("Группа",grp);
-  function syncWho(){
-    stuLab.hidden=whoSel.value!=="one";
-    grpLab.hidden=whoSel.value!=="group";
-  }
-  whoSel.onchange=syncWho;
-  f.appendChild(labeled("Кому",whoSel));
-  f.appendChild(stuLab);f.appendChild(grpLab);
-  f.appendChild(labeled("Занятий переносится",lessons));
-  f.appendChild(labeled("Дата",date));
-  box.appendChild(f);
-  syncWho();
-  box.appendChild(el('<p class="sub" style="margin:0">Занятия добавятся к остатку ученика с нулевой стоимостью: '+
-    "они были оплачены раньше, поэтому в выручку и в долг родителя не попадают.</p>"));
-  var row=el('<div class="btnrow" style="margin-top:4px"></div>');
-  var btn=el('<button class="btn pri" type="button">Перенести занятия</button>');
-  btn.onclick=function(){
-    var n=+lessons.value||0;
-    if(!n){toast("Укажите количество занятий");return;}
-    var targets=[];
-    if(whoSel.value==="group"){
-      var g=state.units[grp.value];
-      if(!g){toast("Выберите группу");return;}
-      targets=groupMembers(g);
-      if(!targets.length){toast("В группе никого нет");return;}
-    }else{
-      var u=state.units[stu.value];
-      if(!u){toast("Выберите ученика");return;}
-      targets=[u];
-    }
-    targets.forEach(function(u2){
-      saveSub({id:newId("s"),studentId:u2.id,soldOn:date.value||today(),
-        pkg:CARRY_LABEL,lessons:n,price:0,discount:0,total:0,note:"carry"});
-    });
-    lessons.value="";
-    toast(targets.length>1?"Перенесено ученикам: "+targets.length:"Занятия перенесены");
-  };
-  row.appendChild(btn);box.appendChild(row);
-  return box;
-}
-
 function salesCard(){
-  var c=el('<div class="card"><div class="chead"><h2>Продажи абонементов</h2>'+
-    '<span class="hint">Количество занятий и стоимость фиксируются в момент продажи и дальше не меняются</span>'+
+  var c=el('<div class="card"><div class="chead"><h2>Начисления</h2>'+
+    '<span class="hint">Количество занятий и сумма фиксируются в момент начисления и дальше не меняются</span>'+
     "</div></div>");
   var h=el('<div class="ref"></div>');
-  h.appendChild(acc("sale:new",'<b>Продать абонемент</b>',"",saleForm));
-  h.appendChild(acc("carry:new",'<b>Перенести занятия с прошлого периода</b>',
-    "для занятий, оплаченных до начала учёта",carryForm));
+  h.appendChild(acc("sale:new",'<b>Начислить вручную</b>',"",saleForm));
   c.appendChild(h);
   var scroll=el('<div class="tscroll"></div>');
-  var tbl=el('<table><thead><tr><th>Дата</th><th>Ученик</th><th>Абонемент</th>'+
+  var tbl=el('<table><thead><tr><th>Дата</th><th>Ученик</th><th>Тариф</th>'+
     '<th class="r">Занятий</th><th class="r">Стоимость</th><th></th>'+
     "</tr></thead><tbody></tbody></table>");
   var tb=tbl.querySelector("tbody"),list=subsList(),sum=0,cnt=0;
@@ -1197,10 +1156,10 @@ function salesCard(){
       '</td><td class="r">'+esc(fmtMoney(s.total))+"</td></tr>");
     var td=document.createElement("td");
     var rm=el('<button class="btn sm" type="button">Удалить</button>');
-    rm.onclick=function(){deleteSub(s.id);toast("Продажа удалена");};
+    rm.onclick=function(){deleteSub(s.id);toast("Запись удалена");};
     td.appendChild(rm);tr.appendChild(td);tb.appendChild(tr);
   });
-  if(!list.length)tb.appendChild(el('<tr><td colspan="6" class="sub">Продаж пока нет.</td></tr>'));
+  if(!list.length)tb.appendChild(el('<tr><td colspan="6" class="sub">Начислений пока нет.</td></tr>'));
   else tb.appendChild(el('<tr class="tot"><td colspan="3">Итого</td><td class="r">'+fmtNum(cnt)+
     '</td><td class="r">'+esc(fmtMoney(sum))+"</td><td></td></tr>"));
   scroll.appendChild(tbl);c.appendChild(scroll);
@@ -1440,8 +1399,8 @@ function viewReports(){
       {v:m.profit,t:fmtMoney(m.profit)}];
   });
   wrap.appendChild(repCard("Финансовый итог за период",
-    "Продано — по датам продажи абонементов; начислено педагогам — по проведённым занятиям",
-    ["Месяц","Продано занятий","Проведено","Продано на сумму","Получено",
+    "Начислено родителям — по датам начисления; начислено педагогам — по проведённым занятиям",
+    ["Месяц","Начислено занятий","Проведено","Начислено родителям","Получено",
      "Начислено педагогам","Выплачено","Заработок школы"],
     fin,
     [{v:"Итого"},{v:T.soldCount},{v:T.held},
@@ -1462,7 +1421,7 @@ function viewReports(){
   });
   debts.sort(function(a,b){return b[5].v-a[5].v;});
   wrap.appendChild(repCard("Долги родителей",
-    "Продано абонементов больше, чем поступило денег; считается за всё время",
+    "Начислено больше, чем поступило денег; считается за всё время",
     ["Ученик","Родитель","Группа","Педагог","Остаток занятий","Долг"],
     debts,[{v:"Итого"},{v:""},{v:""},{v:""},{v:""},{v:dTot,t:fmtMoney(dTot)}],
     "Долги_родителей"));
