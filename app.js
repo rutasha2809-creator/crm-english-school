@@ -155,6 +155,8 @@ function paymentsList(){
   a.sort(function(x,y){return String(y.paidOn).localeCompare(String(x.paidOn));});
   return a;
 }
+/* Перенос занятий с прошлого периода — не продажа: денег за него нет. */
+function isCarry(s){return s.note==="carry"||s.total===0&&s.pkg==="Перенос с прошлого периода";}
 function subsOf(sid){return subsList().filter(function(s){return s.studentId===sid;});}
 /* Сколько занятий куплено ученику за всё время. */
 function lessonsBought(u){
@@ -304,7 +306,7 @@ function viewMonth(){
   /* факты месяца */
   var sold=0,soldCount=0,soldLessons=0;
   subsList().forEach(function(s){
-    if(ymOfDate(s.soldOn)!==ym)return;
+    if(ymOfDate(s.soldOn)!==ym||isCarry(s))return;
     sold+=+s.total||0;soldCount++;soldLessons+=+s.lessons||0;
   });
   var gotIn=0,paidOut=0;
@@ -1120,12 +1122,67 @@ function saleForm(){
   row.appendChild(btn);box.appendChild(row);
   return box;
 }
+/* ---------- перенос занятий с прошлого периода ---------- */
+/* Занятия, оплаченные до начала учёта: добавляют остаток и ничего не начисляют. */
+var CARRY_LABEL="Перенос с прошлого периода";
+function carryForm(){
+  var box=el('<div class="refrow"></div>');
+  var f=el('<div class="fields"></div>');
+  var whoSel=sel("carry-who",[["one","Одному ученику"],["group","Всей группе"]],"one");
+  var stu=sel("carry-student",studentOptions(),"");
+  var grp=sel("carry-group",[["","— выбрать группу —"]].concat(groups().map(function(g){
+    return[g.id,g.name+" · "+groupMembers(g).length+" чел."];})),"");
+  var lessons=inp("carry-lessons","number","",80);
+  var date=inp("carry-date","date",ymShift(state.ym,-1)+"-28");
+  var stuLab=labeled("Ученик",stu),grpLab=labeled("Группа",grp);
+  function syncWho(){
+    stuLab.hidden=whoSel.value!=="one";
+    grpLab.hidden=whoSel.value!=="group";
+  }
+  whoSel.onchange=syncWho;
+  f.appendChild(labeled("Кому",whoSel));
+  f.appendChild(stuLab);f.appendChild(grpLab);
+  f.appendChild(labeled("Занятий переносится",lessons));
+  f.appendChild(labeled("Дата",date));
+  box.appendChild(f);
+  syncWho();
+  box.appendChild(el('<p class="sub" style="margin:0">Занятия добавятся к остатку ученика с нулевой стоимостью: '+
+    "они были оплачены раньше, поэтому в выручку и в долг родителя не попадают.</p>"));
+  var row=el('<div class="btnrow" style="margin-top:4px"></div>');
+  var btn=el('<button class="btn pri" type="button">Перенести занятия</button>');
+  btn.onclick=function(){
+    var n=+lessons.value||0;
+    if(!n){toast("Укажите количество занятий");return;}
+    var targets=[];
+    if(whoSel.value==="group"){
+      var g=state.units[grp.value];
+      if(!g){toast("Выберите группу");return;}
+      targets=groupMembers(g);
+      if(!targets.length){toast("В группе никого нет");return;}
+    }else{
+      var u=state.units[stu.value];
+      if(!u){toast("Выберите ученика");return;}
+      targets=[u];
+    }
+    targets.forEach(function(u2){
+      saveSub({id:newId("s"),studentId:u2.id,soldOn:date.value||today(),
+        pkg:CARRY_LABEL,lessons:n,price:0,discount:0,total:0,note:"carry"});
+    });
+    lessons.value="";
+    toast(targets.length>1?"Перенесено ученикам: "+targets.length:"Занятия перенесены");
+  };
+  row.appendChild(btn);box.appendChild(row);
+  return box;
+}
+
 function salesCard(){
   var c=el('<div class="card"><div class="chead"><h2>Продажи абонементов</h2>'+
     '<span class="hint">Количество занятий и стоимость фиксируются в момент продажи и дальше не меняются</span>'+
     "</div></div>");
   var h=el('<div class="ref"></div>');
   h.appendChild(acc("sale:new",'<b>Продать абонемент</b>',"",saleForm));
+  h.appendChild(acc("carry:new",'<b>Перенести занятия с прошлого периода</b>',
+    "для занятий, оплаченных до начала учёта",carryForm));
   c.appendChild(h);
   var scroll=el('<div class="tscroll"></div>');
   var tbl=el('<table><thead><tr><th>Дата</th><th>Ученик</th><th>Абонемент</th>'+
@@ -1298,7 +1355,7 @@ function repTo(){return state.rep.to||state.ym;}
 function monthTotals(ym){
   var t={sold:0,soldCount:0,got:0,accrued:0,paid:0,held:0,plan:0};
   subsList().forEach(function(s){
-    if(ymOfDate(s.soldOn)!==ym)return;
+    if(ymOfDate(s.soldOn)!==ym||isCarry(s))return;
     t.sold+=+s.total||0;t.soldCount+=+s.lessons||0;
   });
   paymentsList().forEach(function(p){
