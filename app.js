@@ -373,7 +373,7 @@ function saveUnit(uid,patch){
   var cur=state.units[uid];if(!cur)return Promise.resolve();
   var next=Object.assign({},cur,patch);next.id=uid;
   state.units[uid]=next;render();
-  return track(API.saveUnit(uid,next)).catch(saveFailed);
+  return track(API.saveUnit(uid,next,patch)).catch(saveFailed);
 }
 function saveTeacher(tid,patch){
   if(!needWrite())return Promise.resolve();
@@ -1759,8 +1759,10 @@ var API={
     return sb.from("oe_months").upsert({owner:session.user.id,unit_id:m.unitId,month:m.month,
       days:m.days||{},pay:{},note:m.note||""},{onConflict:"owner,unit_id,month"}).then(oops);
   },
-  saveUnit:function(id,u){
+  saveUnit:function(id,u,patch){
     var row=unitToRow(Object.assign({},u,{id:id}));row.owner=session.user.id;
+    /* связь с группами пишем только когда её меняли: устаревшая вкладка не сотрёт чужое */
+    if(patch&&!("groupIds" in patch)&&!("groupId" in patch)){delete row.group_ids;delete row.group_id;}
     return sb.from("oe_units").upsert(row,{onConflict:"owner,id"}).then(oops);
   },
   saveTeacher:function(id,t){
