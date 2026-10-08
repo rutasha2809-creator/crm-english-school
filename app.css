@@ -143,7 +143,7 @@ input.dt{width:132px}
 .refrow .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .refrow .top b{font-family:var(--font-ui);font-size:14px}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
-label.f{display:grid;gap:3px;font-size:11.5px;color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.03em;min-width:0}
+label.f,div.f{display:grid;gap:3px;font-size:11.5px;color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.03em;min-width:0}
 label.f>input,label.f>select,label.f>textarea{font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);width:100%}
 .wd{display:flex;gap:3px;flex-wrap:wrap}
 .wd button{all:unset;cursor:pointer;width:28px;height:26px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line-strong);border-radius:6px;font-family:var(--font-ui);font-size:11.5px;font-weight:600;color:var(--ink-2)}

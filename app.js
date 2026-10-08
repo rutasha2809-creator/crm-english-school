@@ -942,7 +942,7 @@ function datePicker(u,ym){
 }
 function planField(u){
   var ym=calYm(u);
-  var lab=el('<label class="f">Занятия по месяцам</label>');
+  var lab=el('<div class="f">Занятия по месяцам</div>');
   var nav=el('<div class="calnav"></div>');
   var prevM=el('<button class="btn sm" type="button" aria-label="Предыдущий месяц">‹</button>');
   var nextM=el('<button class="btn sm" type="button" aria-label="Следующий месяц">›</button>');
@@ -1074,7 +1074,7 @@ function unitRow(u){
     f.appendChild(field("Родитель","u-par-"+u.id,u.parent,"text",function(v){saveUnit(u.id,{parent:v});}));
     row.appendChild(f);
     var lus=lessonUnitsOfStudent(u);
-    var lab=el('<label class="f">Занятия</label>');
+    var lab=el('<div class="f">Занятия</div>');
     var box=el('<div class="lessons"></div>');
     lus.forEach(function(lu){box.appendChild(lessonLine(u,lu));});
     if(!lus.length)box.appendChild(el('<p class="sub" style="margin:0">Занятий пока нет: добавьте группу или индивидуальные занятия.</p>'));
@@ -1105,7 +1105,7 @@ function unitRow(u){
   row.appendChild(f);
   row.appendChild(planField(u));
 
-  var ml=el('<label class="f">Состав группы</label>');
+  var ml=el('<div class="f">Состав группы</div>');
   var mems=el('<div class="mems"></div>');
   var list=groupMembers(u);
   list.forEach(function(m){
