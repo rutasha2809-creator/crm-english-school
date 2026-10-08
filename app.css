@@ -157,6 +157,7 @@ label.f>input,label.f>select,label.f>textarea{font-weight:400;text-transform:non
 .boot{padding:40px 16px;text-align:center;color:var(--ink-2)}
 .boot b{display:block;font-family:var(--font-ui);font-size:16px;color:var(--ink);margin-bottom:6px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-family:var(--font-ui);font-size:13px;font-weight:600;z-index:90;box-shadow:var(--shadow)}
+.toast.ok{background:#1b7f5c;color:#fff;font-size:15px;padding:12px 22px}
 @media (prefers-reduced-motion:no-preference){.toast{animation:pop .18s ease-out}}
 @keyframes pop{from{opacity:0;transform:translateX(-50%) translateY(6px)}}
 .warnbox{margin:0;padding:10px 14px;background:var(--warn-soft);color:var(--warn);font-size:12.5px;border-bottom:1px solid var(--line)}

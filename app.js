@@ -26,7 +26,7 @@ function fmtNum(n){return(n||0).toLocaleString("ru-RU");}
 function fmtDate(s){if(!s)return"";var a=String(s).split("-");if(a.length!==3)return s;return a[2]+"."+a[1]+"."+a[0].slice(2);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function el(html){var t=document.createElement("template");t.innerHTML=html.trim();return t.content.firstElementChild;}
-function toast(msg){var old=document.querySelector(".toast");if(old)old.remove();var t=el('<div class="toast">'+esc(msg)+"</div>");document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove();},2200);}
+function toast(msg,ok){var old=document.querySelector(".toast");if(old)old.remove();var t=el('<div class="toast'+(ok?" ok":"")+'">'+esc(msg)+"</div>");document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove();},ok?2000:2600);}
 
 /* ---------- справочники ---------- */
 function teacherList(){
@@ -331,7 +331,7 @@ function saveBadge(){
 function track(p){
   saving++;saveErr=null;saveBadge();
   return p.then(function(r){
-    saving--;savedAt=new Date();saveBadge();return r;
+    saving--;savedAt=new Date();saveBadge();if(!saving)toast("✓ Данные сохранены",true);return r;
   },function(e){
     saving--;saveErr=(e&&(e.message||e.code))||"ошибка";saveBadge();throw e;
   });
