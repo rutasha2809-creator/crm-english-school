@@ -3,9 +3,8 @@
 var MONTHS=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 var MONTHS_IN=["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
 var DOW=["пн","вт","ср","чт","пт","сб","вс"];
-var STATUS_ORDER_PLAN=["plan","done","pc","c","off"];
-var STATUS_ORDER_FREE=["none","done","pc"];
-var MARK={plan:"",done:"✓",pc:"₽",c:"×",off:"–"};
+var STATUS_ORDER_PLAN=["none","plan","done","pc","c"];
+var MARK={plan:"",done:"✓",pc:"₽",c:"×"};
 var CLS={plan:"c-plan",done:"c-done",pc:"c-pc",c:"c-c",off:"c-off"};
 
 var state={tab:"month",ref:"teachers",sale:null,rep:{from:null,to:null},ym:null,
@@ -91,16 +90,32 @@ function rateOf(lu){return teacherRate(rateNameOf(lu));}
 
 /* ---------- занятия ---------- */
 function mdoc(u,ym){return state.months[(ym||state.ym)+"__"+u.id]||{days:{},pay:{}};}
+/* План месяца — даты, отмеченные в календаре учебной единицы. */
 function planDays(u,ym){
-  var wd=u.kind==="group"?(u.weekdays||[]):effWeekdays(u),out=[];
-  if(!wd.length)return out;
-  for(var d=1;d<=daysIn(ym);d++){if(wd.indexOf(dowOf(ym,d))>=0)out.push(d);}
+  var md=mdoc(u,ym),days=md.days||{},out=[];
+  for(var d=1;d<=daysIn(ym);d++){
+    var s=days[String(d)];
+    if(s&&s!=="off")out.push(d);
+  }
   return out;
 }
 function dayStatus(u,ym,day,md){
-  var raw=(md.days||{})[String(day)];
-  if(raw)return raw;
-  return planDays(u,ym).indexOf(day)>=0?"plan":"none";
+  return(md.days||{})[String(day)]||"none";
+}
+/* Скопировать план прошлого месяца: те же дни недели, те же недели месяца. */
+function copyPlanFrom(u,fromYm,toYm){
+  var src=mdoc(u,fromYm).days||{},patch={},n=0;
+  var wd={};
+  Object.keys(src).forEach(function(k){
+    var d=+k;if(!d||src[k]==="off")return;
+    wd[dowOf(fromYm,d)]=1;
+  });
+  if(!Object.keys(wd).length)return 0;
+  for(var d2=1;d2<=daysIn(toYm);d2++){
+    if(wd[dowOf(toYm,d2)]&&!(mdoc(u,toYm).days||{})[String(d2)]){patch[String(d2)]="plan";n++;}
+  }
+  if(n)saveMonth2(u,toYm,patch);
+  return n;
 }
 /* Занятия учебной единицы за месяц. Проведённым считается и поздняя отмена с оплатой. */
 function unitStats(lu,ym){
@@ -224,6 +239,16 @@ function saveMonth(u,patch){
   if(pending[id])return pending[id];
   pending[id]=API.saveMonth(next).catch(saveFailed).then(function(){delete pending[id];});
   return pending[id];
+}
+/* Запись отметок в произвольный месяц, не только в выбранный. */
+function saveMonth2(u,ym,days){
+  if(!needWrite())return Promise.resolve();
+  var id=ym+"__"+u.id;
+  var cur=state.months[id]||{unitId:u.id,month:ym,days:{}};
+  var next={unitId:u.id,month:ym,days:Object.assign({},cur.days||{},days),note:cur.note||""};
+  for(var k in next.days){if(!next.days[k])delete next.days[k];}
+  state.months[id]=next;render();
+  return API.saveMonth(next).catch(saveFailed);
 }
 function saveUnit(uid,patch){
   if(!needWrite())return Promise.resolve();
@@ -450,23 +475,21 @@ function viewJournal(){
   });
   scroll.appendChild(grid);card.appendChild(scroll);wrap.appendChild(card);
 
-  var noWd=scheduleUnits().filter(function(lu){
-    return !(lu.kind==="group"?(lu.weekdays||[]):effWeekdays(lu)).length;
-  }).map(function(lu){return lu.name;});
+  var noWd=scheduleUnits().filter(function(lu){return !planDays(lu,ym).length;})
+    .map(function(lu){return lu.name;});
   if(noWd.length)wrap.appendChild(el('<div class="card"><p class="warnbox" style="border-bottom:0;border-radius:var(--r)">'+
-    'Без дней недели, поэтому план не строится: '+esc(noWd.join(", "))+"</p></div>"));
+    'Занятия в этом месяце не назначены: '+esc(noWd.join(", "))+"</p></div>"));
   return wrap;
 }
 function onCell(ev){
   var uid=ev.currentTarget.getAttribute("data-u"),d=+ev.currentTarget.getAttribute("data-d");
   var lu=state.units[uid];if(!lu)return;
   var md=mdoc(lu),cur=dayStatus(lu,state.ym,d,md);
-  var isPlanDay=planDays(lu,state.ym).indexOf(d)>=0;
-  var order=isPlanDay?STATUS_ORDER_PLAN:STATUS_ORDER_FREE;
+  var order=STATUS_ORDER_PLAN;
   var i=order.indexOf(cur);if(i<0)i=0;
   var next=order[(i+1)%order.length];
   var patch={};
-  patch[String(d)]=(next==="plan"||next==="none")?null:next;
+  patch[String(d)]=next==="none"?null:next;
   saveMonth(lu,{days:patch});
 }
 function confirmPast(){
@@ -559,9 +582,16 @@ function acc(id,title,meta,build,cls){
   }
   return box;
 }
+/* Короткая сводка плана месяца. */
 function wdText(u){
-  var wd=u.kind==="group"?(u.weekdays||[]):effWeekdays(u);
-  return wd.length?wd.map(function(d){return DOW[d-1];}).join(", "):"дни не заданы";
+  var lu=u.kind==="group"?u:lessonUnit(u),n=planDays(lu,state.ym).length;
+  return n?n+" зан. в "+MONTHS_IN[ymParts(state.ym).m-1]:"занятия не назначены";
+}
+/* Полный список дат — для карточки ученика, где план только для просмотра. */
+function planText(u){
+  var lu=u.kind==="group"?u:lessonUnit(u),days=planDays(lu,state.ym);
+  if(!days.length)return "занятия не назначены";
+  return days.join(", ")+" "+MONTHS_IN[ymParts(state.ym).m-1];
 }
 function viewRef(){
   var wrap=el('<div class="stack"></div>');
@@ -649,11 +679,9 @@ function soloLessonRow(u){
     function(v){saveUnit(u.id,{tariffName:v});},tariffOptions(u.tariffName)));
   f.appendChild(readField("Родитель",u.parent||"не указан"));
   row.appendChild(f);
-  var wdlab=el('<label class="f">Дни недели</label>');
-  wdlab.appendChild(wdPicker(u));
-  row.appendChild(wdlab);
+  row.appendChild(planField(u));
   row.appendChild(el('<p class="sub" style="margin:0">Остаток занятий: '+fmtNum(lessonsLeft(u))+
-    " · долг: "+esc(fmtMoney(debtOf(u)))+"</p>"));
+    " · долг по всем месяцам: "+esc(fmtMoney(debtOf(u)))+"</p>"));
   return row;
 }
 function refTariffs(){
@@ -748,21 +776,40 @@ function settingSelect(listName,idx,field,value,opts){
   };
   td.appendChild(sel);return td;
 }
-function wdPicker(u){
-  var box=el('<div class="wd"></div>');
-  DOW.forEach(function(name,i){
-    var d=i+1;
-    var b=el('<button type="button">'+name+"</button>");
-    b.setAttribute("aria-pressed",(u.weekdays||[]).indexOf(d)>=0?"true":"false");
-    b.onclick=function(){
-      var wd=(u.weekdays||[]).slice(),k=wd.indexOf(d);
-      if(k>=0)wd.splice(k,1);else wd.push(d);
-      wd.sort(function(a,b2){return a-b2;});
-      saveUnit(u.id,{weekdays:wd});
-    };
-    box.appendChild(b);
-  });
+/* Календарь месяца: клик по дате ставит или снимает занятие. */
+function datePicker(u){
+  var ym=state.ym,n=daysIn(ym),md=mdoc(u,ym);
+  var box=el('<div class="cal"></div>');
+  DOW.forEach(function(name){box.appendChild(el('<span class="calhd">'+name+"</span>"));});
+  var shift=dowOf(ym,1)-1;
+  for(var i=0;i<shift;i++)box.appendChild(el('<span class="calgap"></span>'));
+  for(var d=1;d<=n;d++){
+    (function(day){
+      var st=dayStatus(u,ym,day,md),on=st!=="none";
+      var b=el('<button type="button" class="calday'+(on?" on":"")+'">'+day+"</button>");
+      b.setAttribute("aria-pressed",on?"true":"false");
+      b.title=day+" "+MONTHS_IN[ymParts(ym).m-1]+", "+DOW[dowOf(ym,day)-1];
+      b.onclick=function(){
+        var patch={};patch[String(day)]=on?null:"plan";
+        saveMonth(u,{days:patch});
+      };
+      box.appendChild(b);
+    })(d);
+  }
   return box;
+}
+function planField(u){
+  var lab=el('<label class="f">Занятия в '+esc(ymLabel(state.ym))+"</label>");
+  lab.appendChild(datePicker(u));
+  var row=el('<div class="btnrow" style="margin-top:6px"></div>');
+  var prev=el('<button class="btn sm" type="button">Повторить прошлый месяц</button>');
+  prev.onclick=function(){
+    var n=copyPlanFrom(u,ymShift(state.ym,-1),state.ym);
+    toast(n?"Добавлено занятий: "+n:"В прошлом месяце занятий не было");
+  };
+  row.appendChild(prev);
+  lab.appendChild(row);
+  return lab;
 }
 function field(label,id,value,type,onchange,opts){
   var lab=el('<label class="f">'+esc(label)+"</label>");
@@ -837,7 +884,7 @@ function unitRow(u){
         (u.tariffName?" · "+fmtMoney(tariffPrice(u.tariffName)):"")));
     }
     row.appendChild(f);
-    row.appendChild(readField("Дни недели",wdText(u)));
+    row.appendChild(readField("Занятия в "+ymLabel(state.ym),planText(u)));
     row.appendChild(el('<p class="sub" style="margin:0">Остаток занятий: '+fmtNum(lessonsLeft(u))+
       " · долг: "+esc(fmtMoney(debtOf(u)))+"</p>"));
     if(g){
@@ -858,9 +905,7 @@ function unitRow(u){
   f.appendChild(field("Тариф ученика","u-tn-"+u.id,u.tariffName||"",null,
     function(v){saveUnit(u.id,{tariffName:v});},tariffOptions(u.tariffName)));
   row.appendChild(f);
-  var wdlab2=el('<label class="f">Дни недели</label>');
-  wdlab2.appendChild(wdPicker(u));
-  row.appendChild(wdlab2);
+  row.appendChild(planField(u));
 
   var ml=el('<label class="f">Состав группы</label>');
   var mems=el('<div class="mems"></div>');
